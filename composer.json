@@ -1,0 +1,6 @@
+{
+    "name": "makehaven/access_request",
+    "type": "drupal-custom-module",
+    "description": "Creates buttons to open MakeHaven doors at makehaven.org/access-request",
+    "license": "GPL-2.0-or-later"
+}

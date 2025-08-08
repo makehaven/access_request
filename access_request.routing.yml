@@ -1,0 +1,24 @@
+access_request.asset:
+  path: '/access-request/asset/{asset_identifier}'
+  defaults:
+    _form: '\Drupal\access_request\Form\AccessRequestForm'
+    _title: 'Access Request'
+  requirements:
+    _permission: 'access content'
+    asset_identifier: .+
+
+access_request.proxy:
+  path: '/access-request-proxy'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::proxyRequest'
+    _title: 'Access Request Proxy'
+  requirements:
+    _permission: 'access content'
+
+access_request.main:
+  path: '/access-request'
+  defaults:
+    _form: '\Drupal\access_request\Form\AccessRequestForm'
+    _title: 'Access Request'
+  requirements:
+    _permission: 'access content'

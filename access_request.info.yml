@@ -1,0 +1,7 @@
+name: 'Access Request'
+type: module
+description: 'Creates buttons to open MakeHaven doors at makehaven.org/access-request'
+core_version_requirement: ^10
+package: Custom
+dependencies:
+  - views
