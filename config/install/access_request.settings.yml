@@ -1,5 +1,20 @@
 python_gateway_url: 'https://server.dev.access.makehaven.org/toolauth/req'
 timeout_seconds: 5
 web_hmac_secret: ''
-door_map: ''
+asset_map: |
+  backdoor:
+    name: Back Door
+    description: Main rear entrance to the makerspace, usually used for staff or after-hours access.
+    image: ''
+    category: 'doors'
+  chapeldoor:
+    name: Chapel Door
+    description: Street-facing entrance on Chapel Street, primary door for members and visitors.
+    image: ''
+    category: 'doors'
+  spacedoor:
+    name: Space Door
+    description: Internal access door to the makerspace floor and shared work areas.
+    image: ''
+    category: 'doors'
 dry_run: false

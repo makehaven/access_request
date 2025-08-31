@@ -5,14 +5,6 @@ access_request.asset:
     _title: 'Access Request'
   requirements:
     _permission: 'request tool access'
-
-access_request.health_check:
-  path: '/admin/config/access_request/health'
-  defaults:
-    _controller: '\Drupal\access_request\Controller\AccessRequestController::healthCheck'
-    _title: 'Health Check'
-  requirements:
-    _permission: 'administer site configuration'
     asset_identifier: .+
 
 access_request.proxy:
@@ -39,10 +31,26 @@ access_request.admin_settings:
   requirements:
     _permission: 'administer site configuration'
 
+access_request.health_check:
+  path: '/admin/config/access_request/health'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::healthCheck'
+    _title: 'Health Check'
+  requirements:
+    _permission: 'administer site configuration'
+
 access_request.list:
   path: '/access-request/list'
   defaults:
-    _controller: '\Drupal\access_request\Controller\AccessRequestController::listDoors'
-    _title: 'Door List'
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::listAssets'
+    _title: 'Asset List'
+  requirements:
+    _permission: 'request tool access'
+
+access_request.list_by_category:
+  path: '/access-request/list/{category}'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::listAssets'
+    _title: 'Asset List'
   requirements:
     _permission: 'request tool access'

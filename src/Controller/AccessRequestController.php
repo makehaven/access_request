@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Url;
 use Symfony\Component\Yaml\Yaml;
+use GuzzleHttp\Exception\ClientException;
 
 class AccessRequestController extends ControllerBase {
   protected $httpClient;
@@ -79,7 +80,20 @@ class AccessRequestController extends ControllerBase {
           '@response' => $response_body,
         ]);
       }
-    } catch (\Exception $e) {
+    } catch (ClientException $e) {
+        $latency = microtime(TRUE) - $start_time;
+        if ($e->getResponse()->getStatusCode() == 404) {
+            $build['#markup'] = $this->t('The health check endpoint was not found on the Python gateway (404 Not Found). This is an optional endpoint that may not be implemented on the gateway.<br>Latency: @latency ms', [
+                '@latency' => round($latency * 1000),
+            ]);
+        } else {
+            $build['#markup'] = $this->t('Health check failed with a client error.<br>Latency: @latency ms<br>Error: @error', [
+                '@latency' => round($latency * 1000),
+                '@error' => $e->getMessage(),
+            ]);
+        }
+    }
+    catch (\Exception $e) { // Catches other exceptions like connect timeout
       $latency = microtime(TRUE) - $start_time;
       $build['#markup'] = $this->t('Health check failed with an exception.<br>Latency: @latency ms<br>Error: @error', [
         '@latency' => round($latency * 1000),
@@ -90,44 +104,41 @@ class AccessRequestController extends ControllerBase {
     return $build;
   }
 
-  public function listDoors() {
-    $door_map_yaml = $this->config->get('door_map');
+  public function listAssets($category = NULL) {
+    $asset_map_yaml = $this->config->get('asset_map');
     $build = [];
 
-    if (empty($door_map_yaml)) {
-      $build['#markup'] = $this->t('No doors have been configured.');
+    if (empty($asset_map_yaml)) {
+      $build['#markup'] = $this->t('No assets have been configured.');
       return $build;
     }
 
     try {
-      $door_map = Yaml::parse($door_map_yaml);
+      $asset_map = Yaml::parse($asset_map_yaml);
     }
     catch (\Exception $e) {
-      $this->logger->error('Error parsing door map YAML: @error', ['@error' => $e->getMessage()]);
-      $build['#markup'] = $this->t('There was an error parsing the door map configuration.');
+      $this->logger->error('Error parsing asset map YAML: @error', ['@error' => $e->getMessage()]);
+      $build['#markup'] = $this->t('There was an error parsing the asset map configuration.');
       return $build;
     }
 
-    if (empty($door_map) || !is_array($door_map)) {
-        $build['#markup'] = $this->t('No doors have been configured or the format is incorrect.');
+    if (empty($asset_map) || !is_array($asset_map)) {
+        $build['#markup'] = $this->t('No assets have been configured or the format is incorrect.');
         return $build;
     }
 
-    $items = [];
-    foreach ($door_map as $asset_id => $door_info) {
-      $url = Url::fromRoute('access_request.asset', ['asset_identifier' => $asset_id]);
-      $link = [
-        '#type' => 'link',
-        '#title' => $door_info['name'] ?? $asset_id,
-        '#url' => $url,
-      ];
-      $items[] = $link;
+    $assets = [];
+    foreach ($asset_map as $asset_id => $asset_info) {
+      if (!$category || (isset($asset_info['category']) && $asset_info['category'] === $category)) {
+        $assets[$asset_id] = $asset_info;
+        $assets[$asset_id]['url'] = Url::fromRoute('access_request.asset', ['asset_identifier' => $asset_id]);
+      }
     }
 
-    $build['door_list'] = [
-      '#theme' => 'item_list',
-      '#items' => $items,
-      '#title' => $this->t('Available Doors'),
+    $build['asset_list'] = [
+      '#theme' => 'access_request_asset_cards',
+      '#assets' => $assets,
+      '#title' => $this->t('Available Assets'),
     ];
 
     return $build;
