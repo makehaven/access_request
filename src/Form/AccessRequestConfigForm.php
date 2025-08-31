@@ -4,6 +4,7 @@ namespace Drupal\access_request\Form;
 
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Url;
 
 class AccessRequestConfigForm extends ConfigFormBase {
 
