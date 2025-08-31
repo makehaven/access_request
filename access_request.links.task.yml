@@ -1,0 +1,10 @@
+access_request.admin_settings:
+  route_name: access_request.admin_settings
+  title: 'Settings'
+  base_route: access_request.admin_settings
+
+access_request.health_check:
+  route_name: access_request.health_check
+  title: 'Health Check'
+  base_route: access_request.admin_settings
+  weight: 100

@@ -1,0 +1,36 @@
+<?php
+
+/**
+ * @file
+ * Contains access_request.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function access_request_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the access_request module.
+    case 'help.page.access_request':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Creates buttons to open MakeHaven doors at makehaven.org/access-request') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function access_request_theme() {
+  return [
+    'access_request_asset_cards' => [
+      'variables' => ['assets' => []],
+      'template' => 'access_request_asset_cards',
+    ],
+  ];
+}
