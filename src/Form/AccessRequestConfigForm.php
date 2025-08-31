@@ -49,6 +49,18 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('web_hmac_secret'),
     ];
 
+    $form['user_settings'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('User Settings'),
+    ];
+
+    $form['user_settings']['user_block_field'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('User Block Field'),
+      '#description' => $this->t('The machine name of a boolean field on the user entity. If this field is set to true for a user, they will be blocked from making access requests.'),
+      '#default_value' => $config->get('user_block_field'),
+    ];
+
     $form['view_assets_link'] = [
       '#markup' => $this->t('<a href=":url">View configured assets</a>', [':url' => Url::fromRoute('access_request.list')->toString()]),
     ];
@@ -80,6 +92,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('web_hmac_secret', $form_state->getValue('web_hmac_secret'))
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
+      ->set('user_block_field', $form_state->getValue('user_block_field'))
       ->clear('door_map')
       ->save();
 

@@ -18,3 +18,4 @@ asset_map: |
     image: ''
     category: 'doors'
 dry_run: false
+user_block_field: ''

@@ -44,6 +44,15 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
    */
   public function buildForm(array $form, FormStateInterface $form_state, $asset_identifier = NULL) {
     $current_user = \Drupal::currentUser();
+    $user_block_field = $this->config->get('user_block_field');
+
+    if ($user_block_field) {
+      $user = \Drupal\user\Entity\User::load($current_user->id());
+      if ($user->hasField($user_block_field) && $user->get($user_block_field)->value) {
+        \Drupal::messenger()->addError($this->t('Your access to this system has been revoked. Please contact an administrator.'));
+        return [];
+      }
+    }
 
     if ($current_user->isAnonymous()) {
       // Redirect anonymous users to the login page with the destination URL.
