@@ -28,10 +28,6 @@ class AccessRequestConfigForm extends ConfigFormBase {
   public function buildForm(array $form, FormStateInterface $form_state) {
     $config = $this->config('access_request.settings');
 
-    $form['view_assets_link'] = [
-      '#markup' => $this->t('<a href=":url">View all assets</a>', [':url' => Url::fromRoute('access_request.list')->toString()]),
-    ];
-
     $form['python_gateway_url'] = [
       '#type' => 'textfield',
       '#title' => $this->t('Python Gateway URL'),
@@ -51,6 +47,10 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#title' => $this->t('HMAC Secret'),
       '#description' => $this->t('The HMAC secret for signing requests. Leave empty to disable signing.'),
       '#default_value' => $config->get('web_hmac_secret'),
+    ];
+
+    $form['view_assets_link'] = [
+      '#markup' => $this->t('<a href=":url">View configured assets</a>', [':url' => Url::fromRoute('access_request.list')->toString()]),
     ];
 
     $form['asset_map'] = [

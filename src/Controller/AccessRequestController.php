@@ -83,7 +83,7 @@ class AccessRequestController extends ControllerBase {
     } catch (ClientException $e) {
         $latency = microtime(TRUE) - $start_time;
         if ($e->getResponse()->getStatusCode() == 404) {
-            $build['#markup'] = $this->t('The health check endpoint was not found on the Python gateway (404 Not Found). This is an optional endpoint that may not be implemented on the gateway.<br>Latency: @latency ms', [
+            $build['#markup'] = $this->t('The health check endpoint was not found on the Python gateway (404 Not Found). This is an optional endpoint that may not be implemented on the gateway.<br>Latency: @latency ms<br><br><strong>To implement the health check on the Python gateway:</strong><br>Create an endpoint at `/health` that accepts GET requests. This endpoint should return a 200 OK response with a JSON body, for example: <code>{"status": "ok"}</code>.', [
                 '@latency' => round($latency * 1000),
             ]);
         } else {
