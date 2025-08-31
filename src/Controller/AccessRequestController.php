@@ -50,8 +50,14 @@ class AccessRequestController extends ControllerBase {
 
   public function healthCheck() {
     $gateway_url = $this->config->get('python_gateway_url');
-    $health_check_url = str_replace('/toolauth/req', '/health', $gateway_url);
     $build = [];
+
+    if (empty($gateway_url)) {
+      $build['#markup'] = $this->t('The Python Gateway URL is not configured. Please configure it in the Access Request settings.');
+      return $build;
+    }
+
+    $health_check_url = str_replace('/toolauth/req', '/health', $gateway_url);
 
     $start_time = microtime(TRUE);
     try {
