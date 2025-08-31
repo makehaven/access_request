@@ -1,0 +1,6 @@
+access_request.admin_settings:
+  title: 'Access Request Settings'
+  description: 'Configure the Access Request module.'
+  parent: system.admin_config_system
+  route_name: access_request.admin_settings
+  weight: 100

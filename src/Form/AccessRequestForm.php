@@ -6,8 +6,31 @@ use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Drupal\Core\Url;
+use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Drupal\Core\Config\ConfigFactoryInterface;
+use GuzzleHttp\ClientInterface;
+use Drupal\Core\Flood\FloodInterface;
 
-class AccessRequestForm extends FormBase {
+class AccessRequestForm extends FormBase implements ContainerInjectionInterface {
+
+  protected $config;
+  protected $httpClient;
+  protected $flood;
+
+  public function __construct(ConfigFactoryInterface $config_factory, ClientInterface $http_client, FloodInterface $flood) {
+    $this->config = $config_factory->get('access_request.settings');
+    $this->httpClient = $http_client;
+    $this->flood = $flood;
+  }
+
+  public static function create(ContainerInterface $container) {
+    return new static(
+      $container->get('config.factory'),
+      $container->get('http_client'),
+      $container->get('flood')
+    );
+  }
 
   /**
    * {@inheritdoc}
@@ -72,6 +95,14 @@ class AccessRequestForm extends FormBase {
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
+    // Rate limiting: 10 requests per minute per user/IP.
+    $limit = 10;
+    $window = 60;
+    if (!$this->flood->isAllowed('access_request.form_submit', $limit, $window)) {
+      \Drupal::messenger()->addError($this->t('You have made too many requests in a short time. Please try again later.'));
+      return;
+    }
+
     // Retrieve asset_identifier, card_id, and method.
     $asset_identifier = $form_state->get('asset_identifier');
     $card_id = $form_state->get('card_id');
@@ -93,17 +124,21 @@ class AccessRequestForm extends FormBase {
       // Submit the access request and capture the result.
       $result = $this->requestAssetAccess($payload);
 
-      if ($result['success']) {
-        \Drupal::messenger()->addMessage($this->t('Request submitted successfully.'));
+      switch ($result['status']) {
+        case 'success':
+          \Drupal::messenger()->addMessage($this->t('Access request sent.'));
+          break;
+        case 'denied':
+          \Drupal::messenger()->addError($this->t('Access denied. Reason: @reason', ['@reason' => $result['reason']]));
+          break;
+        case 'error':
+          \Drupal::messenger()->addError($this->t('Temporary error contacting the access server. Please try again.'));
+          break;
       }
-      else {
-        \Drupal::messenger()->addError($this->t('Failed to submit access request. Response from server: @response', [
-          '@response' => $result['response'],
-        ]));
-      }
+      $this->flood->register('access_request.form_submit', $window);
     }
     else {
-      \Drupal::messenger()->addError($this->t('Invalid asset identifier provided.'));
+      \Drupal::messenger()->addError($this->t('Invalid asset identifier provided. Please contact support.'));
     }
   }
 
@@ -117,42 +152,78 @@ class AccessRequestForm extends FormBase {
    *   An array containing the result message and status.
    */
   protected function requestAssetAccess($payload) {
-    // URL for the access request.
-    $url = 'https://server.dev.access.makehaven.org/toolauth/req';
+    $url = $this->config->get('python_gateway_url');
+    $timeout = $this->config->get('timeout_seconds');
+    $hmac_secret = $this->config->get('web_hmac_secret');
+    $request_id = \Drupal::service('uuid')->generate();
+    $current_user = \Drupal::currentUser();
+    $uid = $current_user->id();
+    $payload_array = json_decode($payload, TRUE);
+    $asset_id = $payload_array['asset_identifier'];
 
-    $client = \Drupal::httpClient();
+    $headers = [
+      'Content-Type' => 'application/json',
+    ];
+
+    if (!empty($hmac_secret)) {
+      $signature = hash_hmac('sha256', $payload, $hmac_secret);
+      $headers['X-Signature'] = 'sha256=' . $signature;
+    }
+
+    $start_time = microtime(TRUE);
+
+    if ($this->config->get('dry_run')) {
+      \Drupal::logger('access_request')->info(
+        'Dry-run mode enabled. Would have sent payload: @payload',
+        ['@payload' => $payload]
+      );
+      return ['status' => 'success'];
+    }
+
     try {
-      $response = $client->request('POST', $url, [
-        'headers' => [
-          'Content-Type' => 'application/json',
-        ],
+      $response = $this->httpClient->request('POST', $url, [
+        'headers' => $headers,
         'body' => $payload,
+        'timeout' => $timeout,
       ]);
 
+      $latency = microtime(TRUE) - $start_time;
       $response_body = $response->getBody()->getContents();
-      \Drupal::logger('access_request')->debug('HTTP request result: <pre>@result</pre>', [
-        '@result' => $response_body,
-      ]);
+      $http_status = $response->getStatusCode();
 
       if (strpos($response_body, 'Card accepted') !== FALSE) {
-        return ['success' => TRUE];
+        $result = 'allowed';
+        $reason = '';
+        $return_value = ['status' => 'success'];
       }
       else {
-        return [
-          'success'  => FALSE,
-          'response' => $response_body,
-        ];
+        $result = 'denied';
+        $reason = $response_body;
+        $return_value = ['status' => 'denied', 'reason' => $reason];
       }
     }
     catch (\Exception $e) {
-      \Drupal::logger('access_request')->error('Request failed with error: @error', [
-        '@error' => $e->getMessage(),
-      ]);
-      return [
-        'success'  => FALSE,
-        'response' => $e->getMessage(),
-      ];
+      $latency = microtime(TRUE) - $start_time;
+      $result = 'error';
+      $reason = $e->getMessage();
+      $http_status = 0;
+      $return_value = ['status' => 'error', 'reason' => $reason];
     }
+
+    \Drupal::logger('access_request')->info(
+      'Access request: request_id=@request_id, uid=@uid, asset_id=@asset_id, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
+      [
+        '@request_id' => $request_id,
+        '@uid' => $uid,
+        '@asset_id' => $asset_id,
+        '@http_status' => $http_status,
+        '@latency' => $latency,
+        '@result' => $result,
+        '@reason' => $reason,
+      ]
+    );
+
+    return $return_value;
   }
 
   /**
@@ -194,6 +265,6 @@ class AccessRequestForm extends FormBase {
    *   TRUE if valid, FALSE otherwise.
    */
   protected function isValidAssetIdentifier($asset_identifier) {
-    return !empty($asset_identifier) && preg_match('/^[a-zA-Z0-9_-]+$/', $asset_identifier);
+    return !empty($asset_identifier) && preg_match('/^[a-zA-Z0-9_-]+$/', $asset_identifier) && strlen($asset_identifier) <= 25;
   }
 }

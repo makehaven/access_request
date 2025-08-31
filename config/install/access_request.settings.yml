@@ -1,0 +1,5 @@
+python_gateway_url: 'https://server.dev.access.makehaven.org/toolauth/req'
+timeout_seconds: 5
+web_hmac_secret: ''
+door_map: ''
+dry_run: false
