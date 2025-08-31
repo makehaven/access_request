@@ -131,7 +131,7 @@ class AccessRequestController extends ControllerBase {
     foreach ($asset_map as $asset_id => $asset_info) {
       if (!$category || (isset($asset_info['category']) && $asset_info['category'] === $category)) {
         $assets[$asset_id] = $asset_info;
-        $assets[$asset_id]['url'] = Url::fromRoute('access_request.asset', ['asset_identifier' => $asset_id]);
+        $assets[$asset_id]['url'] = Url::fromRoute('access_request.asset', ['asset_identifier' => $asset_id], ['query' => ['method' => 'website']]);
       }
     }
 

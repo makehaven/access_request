@@ -81,9 +81,13 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $form_state->set('asset_identifier', $asset_identifier);
     $form_state->set('card_id', $card_id);
 
-    // Get the method from the query parameters, defaulting to 'website'.
-    $method = \Drupal::request()->query->get('method', 'website');
+    // Get the method from the query parameters.
+    $method = \Drupal::request()->query->get('method');
     $form_state->set('method', $method);
+
+    // Get the source from the query parameters.
+    $source = \Drupal::request()->query->get('source');
+    $form_state->set('source', $source);
 
     // Automatically submit the form on page load if not already submitted.
     if (!$form_state->has('submitted')) {
@@ -116,11 +120,12 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $asset_identifier = $form_state->get('asset_identifier');
     $card_id = $form_state->get('card_id');
     $method = $form_state->get('method');
+    $source = $form_state->get('source');
+    if (empty($source)) {
+      $source = preg_replace('/reader$/', '', $asset_identifier);
+    }
 
     if ($this->isValidAssetIdentifier($asset_identifier)) {
-      // Derive the source by removing a trailing "reader".
-      $source = preg_replace('/reader$/', '', $asset_identifier);
-
       // Prepare the payload with the extra parameters.
       $payload = json_encode([
         'card_id'          => $card_id,
