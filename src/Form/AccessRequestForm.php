@@ -250,7 +250,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $current_user = \Drupal::currentUser();
     $uid = $current_user->id();
 
-    $user = \Drupal\user\Entity\User::load($uid);
+    $user = \Drupal::entityTypeManager()->getStorage('user')->load($uid);
     $card_id = $user->get('field_card_serial_number')->value;
 
     if (empty($card_id)) {
