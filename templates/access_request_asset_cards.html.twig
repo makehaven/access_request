@@ -1,0 +1,37 @@
+{#
+/**
+ * @file
+ * Default theme implementation to display a list of asset cards.
+ *
+ * Available variables:
+ * - assets: An array of assets. Each asset is an array with the following keys:
+ *   - name: The name of the asset.
+ *   - description: The description of the asset.
+ *   - image: The URL of the asset's image.
+ *   - url: The URL to request access to the asset.
+ *
+ * @see template_preprocess_access_request_asset_cards()
+ *
+ * @ingroup themeable
+ */
+#}
+{% if assets %}
+  <div class="row">
+    {% for asset in assets %}
+      <div class="col-md-4 mb-4">
+        <div class="card">
+          {% if asset.image %}
+            <img src="{{ asset.image }}" class="card-img-top" alt="{{ asset.name }}">
+          {% endif %}
+          <div class="card-body">
+            <h5 class="card-title">{{ asset.name }}</h5>
+            <p class="card-text">{{ asset.description }}</p>
+            <a href="{{ asset.url }}" class="btn btn-primary">{{ 'Request Access'|t }}</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p>{{ 'No assets found.'|t }}</p>
+{% endif %}

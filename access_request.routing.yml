@@ -4,7 +4,7 @@ access_request.asset:
     _form: '\Drupal\access_request\Form\AccessRequestForm'
     _title: 'Access Request'
   requirements:
-    _permission: 'access content'
+    _permission: 'request tool access'
     asset_identifier: .+
 
 access_request.proxy:
@@ -13,7 +13,7 @@ access_request.proxy:
     _controller: '\Drupal\access_request\Controller\AccessRequestController::proxyRequest'
     _title: 'Access Request Proxy'
   requirements:
-    _permission: 'access content'
+    _permission: 'request tool access'
 
 access_request.main:
   path: '/access-request'
@@ -21,4 +21,36 @@ access_request.main:
     _form: '\Drupal\access_request\Form\AccessRequestForm'
     _title: 'Access Request'
   requirements:
-    _permission: 'access content'
+    _permission: 'request tool access'
+
+access_request.admin_settings:
+  path: '/admin/config/access_request'
+  defaults:
+    _form: '\Drupal\access_request\Form\AccessRequestConfigForm'
+    _title: 'Access Request Settings'
+  requirements:
+    _permission: 'administer site configuration'
+
+access_request.health_check:
+  path: '/admin/config/access_request/health'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::healthCheck'
+    _title: 'Health Check'
+  requirements:
+    _permission: 'administer site configuration'
+
+access_request.list:
+  path: '/access-request/list'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::listAssets'
+    _title: 'Asset List'
+  requirements:
+    _permission: 'request tool access'
+
+access_request.list_by_category:
+  path: '/access-request/list/{category}'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::listAssets'
+    _title: 'Asset List'
+  requirements:
+    _permission: 'request tool access'
