@@ -68,15 +68,8 @@ class AccessRequestConfigForm extends ConfigFormBase {
     $form['asset_map'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Asset Map'),
-      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;image: /modules/custom/access_request/images/backdoor.jpg<br>&nbsp;&nbsp;category: doors</code>'),
+      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br>- <strong>permission_id</strong>: The permission ID required for this asset (optional, defaults to the asset ID).<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;image: /modules/custom/access_request/images/backdoor.jpg<br>&nbsp;&nbsp;category: doors<br>&nbsp;&nbsp;permission_id: backdoor_permission</code>'),
       '#default_value' => $config->get('asset_map'),
-    ];
-
-    $form['door_map'] = [
-      '#type' => 'textarea',
-      '#title' => $this->t('Door Map'),
-      '#description' => $this->t('A YAML mapping of asset IDs to permission IDs.'),
-      '#default_value' => $config->get('door_map'),
     ];
 
     $form['dry_run'] = [
@@ -98,7 +91,6 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('timeout_seconds', $form_state->getValue('timeout_seconds'))
       ->set('web_hmac_secret', $form_state->getValue('web_hmac_secret'))
       ->set('asset_map', $form_state->getValue('asset_map'))
-      ->set('door_map', $form_state->getValue('door_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))
       ->save();
