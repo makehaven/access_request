@@ -4,48 +4,54 @@ namespace Drupal\access_request\Controller;
 use Drupal\Core\Controller\ControllerBase;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use GuzzleHttp\ClientInterface;
-use Psr\Log\LoggerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Url;
 use Symfony\Component\Yaml\Yaml;
 use GuzzleHttp\Exception\ClientException;
+use Drupal\access_request\AccessRequestService;
+use GuzzleHttp\ClientInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 class AccessRequestController extends ControllerBase {
+  protected $accessRequestService;
+  protected $config;
   protected $httpClient;
   protected $logger;
-  protected $config;
 
-  public function __construct(ClientInterface $http_client, LoggerInterface $logger, ConfigFactoryInterface $config_factory) {
-    $this->httpClient = $http_client;
-    $this->logger = $logger;
+  public function __construct(AccessRequestService $access_request_service, ConfigFactoryInterface $config_factory, ClientInterface $http_client, LoggerChannelFactoryInterface $logger_factory) {
+    $this->accessRequestService = $access_request_service;
     $this->config = $config_factory->get('access_request.settings');
+    $this->httpClient = $http_client;
+    $this->logger = $logger_factory->get('access_request');
   }
 
   public static function create(ContainerInterface $container) {
     return new static(
+      $container->get('access_request.service'),
+      $container->get('config.factory'),
       $container->get('http_client'),
-      $container->get('logger.factory')->get('access_request'),
-      $container->get('config.factory')
+      $container->get('logger.factory')
     );
   }
 
   public function proxyRequest() {
-    $url = 'https://server.dev.access.makehaven.org/toolauth/req';
     $data = file_get_contents('php://input');
+    $request_data = json_decode($data, TRUE);
+    $asset_identifier = $request_data['asset_identifier'] ?? NULL;
+    $method = $request_data['method'] ?? 'proxy';
+    $source = $request_data['source'] ?? NULL;
 
-    try {
-      $response = $this->httpClient->post($url, [
-        'headers' => ['Content-Type' => 'application/json'],
-        'body' => $data,
-      ]);
-
-      $this->logger->debug('HTTP request result: @result', ['@result' => $response->getBody()->getContents()]);
-      return new JsonResponse(json_decode($response->getBody()->getContents(), TRUE));
+    if (empty($asset_identifier)) {
+      return new JsonResponse(['success' => false, 'message' => 'asset_identifier not provided.'], 400);
     }
-    catch (\Exception $e) {
-      $this->logger->error('HTTP request error: @error', ['@error' => $e->getMessage()]);
-      return new JsonResponse(['success' => false, 'message' => 'Error sending the request.']);
+
+    $result = $this->accessRequestService->performAccessRequest($asset_identifier, $method, $source);
+
+    if ($result['status'] === 'success' || $result['status'] === 'denied') {
+      return new JsonResponse($result);
+    }
+    else {
+      return new JsonResponse($result, 500);
     }
   }
 
