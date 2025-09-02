@@ -72,6 +72,13 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('asset_map'),
     ];
 
+    $form['door_map'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Door Map'),
+      '#description' => $this->t('A YAML mapping of asset IDs to permission IDs.'),
+      '#default_value' => $config->get('door_map'),
+    ];
+
     $form['dry_run'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Dry-run mode'),
@@ -91,9 +98,9 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('timeout_seconds', $form_state->getValue('timeout_seconds'))
       ->set('web_hmac_secret', $form_state->getValue('web_hmac_secret'))
       ->set('asset_map', $form_state->getValue('asset_map'))
+      ->set('door_map', $form_state->getValue('door_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))
-      ->clear('door_map')
       ->save();
 
     parent::submitForm($form, $form_state);

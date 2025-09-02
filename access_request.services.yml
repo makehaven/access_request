@@ -1,0 +1,4 @@
+services:
+  access_request.service:
+    class: Drupal\access_request\AccessRequestService
+    arguments: ['@config.factory', '@logger.factory', '@http_client', '@current_user', '@entity_type.manager', '@uuid']
