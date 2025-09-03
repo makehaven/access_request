@@ -8,18 +8,16 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Url;
 use Symfony\Component\Yaml\Yaml;
 use GuzzleHttp\Exception\ClientException;
-use Drupal\access_request\AccessRequestService;
 use GuzzleHttp\ClientInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use GuzzleHttp\Exception\RequestException;
 
 class AccessRequestController extends ControllerBase {
-  protected $accessRequestService;
   protected $config;
   protected $httpClient;
   protected $logger;
 
-  public function __construct(AccessRequestService $access_request_service, ConfigFactoryInterface $config_factory, ClientInterface $http_client, LoggerChannelFactoryInterface $logger_factory) {
-    $this->accessRequestService = $access_request_service;
+  public function __construct(ConfigFactoryInterface $config_factory, ClientInterface $http_client, LoggerChannelFactoryInterface $logger_factory) {
     $this->config = $config_factory->get('access_request.settings');
     $this->httpClient = $http_client;
     $this->logger = $logger_factory->get('access_request');
@@ -27,7 +25,6 @@ class AccessRequestController extends ControllerBase {
 
   public static function create(ContainerInterface $container) {
     return new static(
-      $container->get('access_request.service'),
       $container->get('config.factory'),
       $container->get('http_client'),
       $container->get('logger.factory')
@@ -35,23 +32,21 @@ class AccessRequestController extends ControllerBase {
   }
 
   public function proxyRequest() {
+    $url = $this->config->get('python_gateway_url');
     $data = file_get_contents('php://input');
-    $request_data = json_decode($data, TRUE);
-    $asset_identifier = $request_data['asset_identifier'] ?? NULL;
-    $method = $request_data['method'] ?? 'proxy';
-    $source = $request_data['source'] ?? NULL;
 
-    if (empty($asset_identifier)) {
-      return new JsonResponse(['success' => false, 'message' => 'asset_identifier not provided.'], 400);
+    try {
+      $response = $this->httpClient->post($url, [
+        'headers' => ['Content-Type' => 'application/json'],
+        'body' => $data,
+        'http_errors' => false,
+      ]);
+
+      return new JsonResponse(json_decode($response->getBody()->getContents(), TRUE), $response->getStatusCode());
     }
-
-    $result = $this->accessRequestService->performAccessRequest($asset_identifier, $method, $source);
-
-    if ($result['status'] === 'success' || $result['status'] === 'denied') {
-      return new JsonResponse($result);
-    }
-    else {
-      return new JsonResponse($result, 500);
+    catch (\Exception $e) {
+      $this->logger->error('Proxy request failed with exception: @error', ['@error' => $e->getMessage()]);
+      return new JsonResponse(['success' => false, 'message' => 'Error sending the request.'], 500);
     }
   }
 
@@ -66,43 +61,25 @@ class AccessRequestController extends ControllerBase {
 
     $health_check_url = str_replace('/toolauth/req', '/health', $gateway_url);
 
-    $start_time = microtime(TRUE);
     try {
-      $response = $this->httpClient->get($health_check_url);
-      $latency = microtime(TRUE) - $start_time;
+      $response = $this->httpClient->get($health_check_url, ['http_errors' => false]);
       $status = $response->getStatusCode();
       $response_body = $response->getBody()->getContents();
 
       if ($status == 200) {
-        $build['#markup'] = $this->t('Health check successful.<br>Status: @status<br>Latency: @latency ms<br>Response: @response', [
+        $build['#markup'] = $this->t('Health check successful.<br>Status: @status<br>Response: @response', [
           '@status' => $status,
-          '@latency' => round($latency * 1000),
           '@response' => $response_body,
         ]);
       } else {
-        $build['#markup'] = $this->t('Health check failed.<br>Status: @status<br>Latency: @latency ms<br>Response: @response', [
+        $build['#markup'] = $this->t('Health check failed.<br>Status: @status<br>Response: @response', [
           '@status' => $status,
-          '@latency' => round($latency * 1000),
           '@response' => $response_body,
         ]);
       }
-    } catch (ClientException $e) {
-        $latency = microtime(TRUE) - $start_time;
-        if ($e->getResponse()->getStatusCode() == 404) {
-            $build['#markup'] = $this->t('The health check endpoint was not found on the Python gateway (404 Not Found). This is an optional endpoint that may not be implemented on the gateway.<br>Latency: @latency ms<br><br><strong>To implement the health check on the Python gateway:</strong><br>Create an endpoint at `/health` that accepts GET requests. This endpoint should return a 200 OK response with a JSON body, for example: <code>{"status": "ok"}</code>.', [
-                '@latency' => round($latency * 1000),
-            ]);
-        } else {
-            $build['#markup'] = $this->t('Health check failed with a client error.<br>Latency: @latency ms<br>Error: @error', [
-                '@latency' => round($latency * 1000),
-                '@error' => $e->getMessage(),
-            ]);
-        }
     }
-    catch (\Exception $e) { // Catches other exceptions like connect timeout
-      $latency = microtime(TRUE) - $start_time;
-      $build['#markup'] = $this->t('Health check failed with an exception.<br>Latency: @latency ms<br>Error: @error', [
-        '@latency' => round($latency * 1000),
+    catch (\Exception $e) {
+      $build['#markup'] = $this->t('Health check failed with an exception.<br>Error: @error', [
         '@error' => $e->getMessage(),
       ]);
     }
@@ -137,7 +114,7 @@ class AccessRequestController extends ControllerBase {
     foreach ($asset_map as $asset_id => $asset_info) {
       if (!$category || (isset($asset_info['category']) && $asset_info['category'] === $category)) {
         $assets[$asset_id] = $asset_info;
-        $assets[$asset_id]['url'] = Url::fromRoute('access_request.asset', ['asset_identifier' => $asset_id], ['query' => ['method' => 'website']]);
+        $assets[$asset_id]['url'] = Url::fromRoute('access_request.asset', ['asset' => $asset_id], ['query' => ['method' => 'website']]);
       }
     }
 
@@ -150,4 +127,3 @@ class AccessRequestController extends ControllerBase {
     return $build;
   }
 }
-

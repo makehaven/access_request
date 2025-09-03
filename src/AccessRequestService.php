@@ -3,13 +3,15 @@
 namespace Drupal\access_request;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Psr\Log\LoggerInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use GuzzleHttp\ClientInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Component\Uuid\UuidInterface;
 use GuzzleHttp\Exception\RequestException;
 use Symfony\Component\Yaml\Yaml;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
  * Service for handling access requests.
@@ -22,42 +24,58 @@ class AccessRequestService {
   protected $currentUser;
   protected $entityTypeManager;
   protected $uuid;
+  protected $requestStack;
+  protected $routeMatch;
 
   /**
    * Constructs an AccessRequestService object.
    */
-  public function __construct(ConfigFactoryInterface $config_factory, \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid) {
+  public function __construct(ConfigFactoryInterface $config_factory, LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid, RequestStack $request_stack, RouteMatchInterface $route_match) {
     $this->config = $config_factory->get('access_request.settings');
     $this->logger = $logger_factory->get('access_request');
     $this->httpClient = $http_client;
     $this->currentUser = $current_user;
     $this->entityTypeManager = $entity_type_manager;
     $this->uuid = $uuid;
+    $this->requestStack = $request_stack;
+    $this->routeMatch = $route_match;
   }
 
   /**
    * Performs the access request.
    */
-  public function performAccessRequest($asset_identifier, $method, $source = NULL) {
-    $card_id = $this->fetchCardIdForUser($this->currentUser->id());
+  public function performAccessRequest() {
+    $request = $this->requestStack->getCurrentRequest();
+    $asset_id = $this->routeMatch->getParameter('asset');
+    $method = $request->query->get('method', 'qr');
 
-    if (empty($source)) {
-      $source = preg_replace('/reader$/', '', $asset_identifier);
+    $readerKey = NULL;
+
+    if ($method === 'gui') {
+      $asset_map_yaml = $this->config->get('asset_map');
+      $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
+      $readerKey = $asset_map[$asset_id]['reader_name'] ?? NULL;
     }
 
-    $asset_map_yaml = $this->config->get('asset_map');
-    $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
-    $permission_id = $asset_map[$asset_identifier]['permission_id'] ?? $asset_identifier;
+    // If not a GUI flow or if GUI override is not present, use default normalization.
+    if ($readerKey === NULL) {
+      $readerKey = $asset_id;
+      if (!preg_match('/reader$/', $readerKey)) {
+        $readerKey .= 'reader';
+      }
+    }
+
+    $card_id = $this->fetchCardIdForUser($this->currentUser->id());
 
     $payload_array = [
+      'reader_name' => $readerKey,
+      'card_id' => $card_id ?? '',
+      // Optional metadata for logs.
       'uid' => $this->currentUser->id(),
       'email' => $this->currentUser->getEmail(),
-      'card_id' => $card_id ?? '',
-      'asset_identifier' => $asset_identifier,
-      'reader_name' => $asset_identifier,
-      'permission_id' => $permission_id,
-      'source' => $source,
-      'method' => $method,
+      'asset_id' => $asset_id,
+      'permission_id' => $this->getPermissionId($asset_id),
+      'source' => $method,
     ];
 
     return $this->sendRequest($payload_array);
@@ -74,11 +92,7 @@ class AccessRequestService {
 
     $profile_storage = $this->entityTypeManager->getStorage('profile');
     if ($profile_storage) {
-      $profiles = $profile_storage->loadByProperties([
-        'uid'  => $uid,
-        'type' => 'main',
-      ]);
-
+      $profiles = $profile_storage->loadByProperties(['uid' => $uid, 'type' => 'main']);
       if ($profiles) {
         $profile = reset($profiles);
         if ($profile && $profile->hasField('field_card_serial_number') && !empty($profile->get('field_card_serial_number')->value)) {
@@ -91,6 +105,15 @@ class AccessRequestService {
   }
 
   /**
+   * Gets the permission ID for an asset.
+   */
+  protected function getPermissionId($asset_id) {
+    $asset_map_yaml = $this->config->get('asset_map');
+    $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
+    return $asset_map[$asset_id]['permission_id'] ?? $asset_id;
+  }
+
+  /**
    * Sends the request to the gateway.
    */
   protected function sendRequest(array $payload_array) {
@@ -100,18 +123,23 @@ class AccessRequestService {
     $request_id = $this->uuid->generate();
 
     $headers = ['Content-Type' => 'application/json'];
-    $payload = json_encode($payload_array);
+    // The gateway only requires reader_name and card_id.
+    $authoritative_payload = [
+      'reader_name' => $payload_array['reader_name'],
+      'card_id' => $payload_array['card_id'],
+    ];
+    $payload_for_gateway = json_encode($authoritative_payload);
 
     if (!empty($hmac_secret)) {
-      $signature = hash_hmac('sha256', $payload, $hmac_secret);
+      $signature = hash_hmac('sha256', $payload_for_gateway, $hmac_secret);
       $headers['X-Signature'] = 'sha256=' . $signature;
     }
 
     $start_time = microtime(TRUE);
 
     if ($this->config->get('dry_run')) {
-      $this->logger->info('Dry-run mode enabled. Would have sent payload: @payload', ['@payload' => $payload]);
-      return ['status' => 'success'];
+      $this->logger->info('Dry-run mode enabled. Would have sent payload: @payload', ['@payload' => json_encode($payload_array)]);
+      return ['http_status' => 201, 'body' => 'Dry run: Card accepted'];
     }
 
     $log_context = [
@@ -119,63 +147,41 @@ class AccessRequestService {
       '@uid' => $payload_array['uid'],
       '@email' => $payload_array['email'],
       '@card_id' => $payload_array['card_id'],
-      '@asset_id' => $payload_array['asset_identifier'],
+      '@asset_id' => $payload_array['asset_id'],
       '@permission_id' => $payload_array['permission_id'],
+      '@reader_name' => $payload_array['reader_name'],
     ];
 
     try {
       $response = $this->httpClient->request('POST', $url, [
         'headers' => $headers,
-        'body' => $payload,
+        'body' => $payload_for_gateway,
         'timeout' => $timeout,
+        'http_errors' => false, // We want to handle 4xx/5xx responses ourselves.
       ]);
 
       $latency = microtime(TRUE) - $start_time;
-      $response_body = $response->getBody()->getContents();
       $http_status = $response->getStatusCode();
-
-      if (strpos($response_body, 'Card accepted') !== FALSE) {
-        $result = 'allowed';
-        $reason = '';
-        $return_value = ['status' => 'success'];
-      } else {
-        $result = 'denied';
-        $reason = $response_body;
-        $return_value = ['status' => 'denied', 'reason' => $reason];
-      }
+      $response_body = $response->getBody()->getContents();
+      $result = ($http_status === 201) ? 'allowed' : 'denied';
     }
     catch (\Exception $e) {
       $latency = microtime(TRUE) - $start_time;
       $result = 'error';
-      $reason = $e->getMessage();
       $http_status = 0;
-      $return_value = ['status' => 'error', 'reason' => 'An unexpected error occurred.'];
-
-      if ($e instanceof RequestException && $e->hasResponse()) {
-        $response = $e->getResponse();
-        $http_status = $response->getStatusCode();
-        $response_body = (string) $response->getBody();
-        $json_response = json_decode($response_body, TRUE);
-        if (json_last_error() === JSON_ERROR_NONE) {
-          $reason = 'Server error. Response: ' . print_r($json_response, TRUE);
-        }
-        else {
-          $reason = 'Server error. Raw response: ' . $response_body;
-        }
-        $return_value['reason'] = $reason;
-      }
+      $response_body = $e->getMessage();
     }
 
     $log_context['@http_status'] = $http_status;
     $log_context['@latency'] = $latency;
     $log_context['@result'] = $result;
-    $log_context['@reason'] = $reason;
+    $log_context['@reason'] = $response_body;
 
     $this->logger->info(
-      'Access request: request_id=@request_id, uid=@uid, email=@email, card_id=@card_id, asset_id=@asset_id, permission_id=@permission_id, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
+      'Access request: request_id=@request_id, uid=@uid, email=@email, card_id=@card_id, asset_id=@asset_id, permission_id=@permission_id, reader_name=@reader_name, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
       $log_context
     );
 
-    return $return_value;
+    return ['http_status' => $http_status, 'body' => $response_body];
   }
 }
