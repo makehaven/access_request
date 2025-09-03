@@ -45,14 +45,14 @@ class AccessRequestService {
       $source = preg_replace('/reader$/', '', $asset_identifier);
     }
 
-    $door_map_yaml = $this->config->get('door_map');
-    $door_map = Yaml::parse($door_map_yaml) ?? [];
-    $permission_id = $door_map[$asset_identifier] ?? $asset_identifier;
+    $asset_map_yaml = $this->config->get('asset_map');
+    $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
+    $permission_id = $asset_map[$asset_identifier]['permission_id'] ?? $asset_identifier;
 
     $payload_array = [
       'uid' => $this->currentUser->id(),
       'email' => $this->currentUser->getEmail(),
-      'card_serial' => $card_id ?? '',
+      'card_id' => $card_id ?? '',
       'asset_identifier' => $asset_identifier,
       'reader_name' => $asset_identifier,
       'permission_id' => $permission_id,
@@ -118,7 +118,7 @@ class AccessRequestService {
       '@request_id' => $request_id,
       '@uid' => $payload_array['uid'],
       '@email' => $payload_array['email'],
-      '@card_serial' => $payload_array['card_serial'],
+      '@card_id' => $payload_array['card_id'],
       '@asset_id' => $payload_array['asset_identifier'],
       '@permission_id' => $payload_array['permission_id'],
     ];
@@ -172,7 +172,7 @@ class AccessRequestService {
     $log_context['@reason'] = $reason;
 
     $this->logger->info(
-      'Access request: request_id=@request_id, uid=@uid, email=@email, card_serial=@card_serial, asset_id=@asset_id, permission_id=@permission_id, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
+      'Access request: request_id=@request_id, uid=@uid, email=@email, card_id=@card_id, asset_id=@asset_id, permission_id=@permission_id, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
       $log_context
     );
 
