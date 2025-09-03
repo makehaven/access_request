@@ -1,11 +1,11 @@
 access_request.asset:
-  path: '/access-request/asset/{asset_identifier}'
+  path: '/access-request/asset/{asset}'
   defaults:
     _form: '\Drupal\access_request\Form\AccessRequestForm'
     _title: 'Access Request'
   requirements:
     _permission: 'request tool access'
-    asset_identifier: .+
+    asset: '^[a-z0-9_-]+$'
 
 access_request.proxy:
   path: '/access-request-proxy'

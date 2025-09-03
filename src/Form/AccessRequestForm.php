@@ -12,6 +12,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Flood\FloodInterface;
 use Drupal\access_request\AccessRequestService;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
 
 class AccessRequestForm extends FormBase implements ContainerInjectionInterface {
 
@@ -19,12 +20,14 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
   protected $accessRequestService;
   protected $flood;
   protected $currentUser;
+  protected $routeMatch;
 
-  public function __construct(ConfigFactoryInterface $config_factory, AccessRequestService $access_request_service, FloodInterface $flood, AccountInterface $current_user) {
+  public function __construct(ConfigFactoryInterface $config_factory, AccessRequestService $access_request_service, FloodInterface $flood, AccountInterface $current_user, RouteMatchInterface $route_match) {
     $this->config = $config_factory->get('access_request.settings');
     $this->accessRequestService = $access_request_service;
     $this->flood = $flood;
     $this->currentUser = $current_user;
+    $this->routeMatch = $route_match;
   }
 
   public static function create(ContainerInterface $container) {
@@ -32,7 +35,8 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       $container->get('config.factory'),
       $container->get('access_request.service'),
       $container->get('flood'),
-      $container->get('current_user')
+      $container->get('current_user'),
+      $container->get('current_route_match')
     );
   }
 
@@ -52,46 +56,30 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     if ($user_block_field) {
       $user = \Drupal\user\Entity\User::load($this->currentUser->id());
       if ($user->hasField($user_block_field) && $user->get($user_block_field)->value) {
-        \Drupal::messenger()->addError($this->t('Your access to this system has been revoked. Please contact an administrator.'));
+        $this->messenger()->addError($this->t('Your access to this system has been revoked. Please contact an administrator.'));
         return [];
       }
     }
 
     if ($this->currentUser->isAnonymous()) {
-      // Redirect anonymous users to the login page with the destination URL.
-      $url = Url::fromRoute('user.login', [], [
-        'query' => ['destination' => "/access-request/asset/{$asset_identifier}"],
-      ]);
+      $url = Url::fromRoute('user.login', [], ['query' => ['destination' => $this->getRequest()->getRequestUri()]]);
       return new RedirectResponse($url->toString());
     }
 
-    // Ensure the asset_identifier is provided.
-    if (empty($asset_identifier)) {
-      if (\Drupal::request()->getPathInfo() === '/access-request/asset') {
-        \Drupal::messenger()->addError($this->t('No asset identifier provided in the URL. Please contact support.'));
-      }
-      return [];
-    }
-
-    // Fetch the card ID from the user's profile.
     $card_id = $this->accessRequestService->fetchCardIdForUser($this->currentUser->id());
     if (empty($card_id)) {
-      \Drupal::messenger()->addError($this->t('No card found associated with your account. Please contact support.'));
+      $this->messenger()->addError($this->t('No card found associated with your account. Please contact support.'));
       return [];
     }
 
-    // Store asset_identifier and method in form state.
-    $form_state->set('asset_identifier', $asset_identifier);
-    $form_state->set('method', \Drupal::request()->query->get('method'));
-    $form_state->set('source', \Drupal::request()->query->get('source'));
-
     // Automatically submit the form on page load if not already submitted.
-    if (!$form_state->has('submitted')) {
-      $form_state->set('submitted', TRUE);
+    if (!$form_state->isSubmitted()) {
       $this->submitForm($form, $form_state);
     }
 
-    // Provide a button to resend the request.
+    // This form is intended to be programmatically submitted.
+    // The resend button is a fallback for when javascript might fail,
+    // or for manual resubmission.
     $form['resend'] = [
       '#type' => 'submit',
       '#value' => $this->t('Resend Request'),
@@ -104,51 +92,31 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
-    // Rate limiting: 10 requests per minute per user/IP.
-    $limit = 10;
-    $window = 60;
-    if (!$this->flood->isAllowed('access_request.form_submit', $limit, $window)) {
-      \Drupal::messenger()->addError($this->t('You have made too many requests in a short time. Please try again later.'));
+    // Rate limiting.
+    if (!$this->flood->isAllowed('access_request.form_submit', 10, 60)) {
+      $this->messenger()->addError($this->t('You have made too many requests in a short time. Please try again later.'));
       return;
     }
 
-    // Retrieve asset_identifier, method, and source.
-    $asset_identifier = $form_state->get('asset_identifier');
-    $method = $form_state->get('method');
-    $source = $form_state->get('source');
+    $result = $this->accessRequestService->performAccessRequest();
+    $this->flood->register('access_request.form_submit', 60);
 
-    if ($this->isValidAssetIdentifier($asset_identifier)) {
-      // Submit the access request and capture the result.
-      $result = $this->accessRequestService->performAccessRequest($asset_identifier, $method, $source);
-
-      switch ($result['status']) {
-        case 'success':
-          \Drupal::messenger()->addMessage($this->t('Access request sent.'));
-          break;
-        case 'denied':
-          \Drupal::messenger()->addError($this->t('Access denied. Reason: @reason', ['@reason' => $result['reason']]));
-          break;
-        case 'error':
-          \Drupal::messenger()->addError($this->t('Temporary error contacting the access server. Please try again.'));
-          break;
-      }
-      $this->flood->register('access_request.form_submit', $window);
+    switch ($result['http_status']) {
+      case 201:
+        $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
+        break;
+      case 403:
+        $this->messenger()->addError($this->t('Access denied: missing required badge/permission.'));
+        break;
+      case 400:
+        $this->messenger()->addError($this->t('Bad request: unknown reader. Check the QR’s reader key or server config.'));
+        break;
+      default:
+        $this->messenger()->addError($this->t('Access system error. Try again or contact an admin.'));
+        break;
     }
-    else {
-      \Drupal::messenger()->addError($this->t('Invalid asset identifier provided. Please contact support.'));
-    }
-  }
 
-  /**
-   * Validate the asset identifier.
-   *
-   * @param string $asset_identifier
-   *   The asset identifier to validate.
-   *
-   * @return bool
-   *   TRUE if valid, FALSE otherwise.
-   */
-  protected function isValidAssetIdentifier($asset_identifier) {
-    return !empty($asset_identifier) && preg_match('/^[a-zA-Z0-9_-]+$/', $asset_identifier) && strlen($asset_identifier) <= 25;
+    // Redirect to the front page after showing the message.
+    $form_state->setRedirect('<front>');
   }
 }
