@@ -68,9 +68,19 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
   /**
    * {@inheritdoc}
    *
-   * @param string|null $asset_identifier
+   * @param string|null $asset
+   *   The asset identifier from the URL.
    */
-  public function buildForm(array $form, FormStateInterface $form_state, $asset_identifier = NULL) {
+  public function buildForm(array $form, FormStateInterface $form_state, $asset = NULL) {
+    // If no asset is specified in the URL, redirect to the asset list page.
+    if (empty($asset)) {
+      $url = Url::fromRoute('access_request.list');
+      return new RedirectResponse($url->toString());
+    }
+
+    // Store the asset for the submit handler.
+    $form_state->set('asset', $asset);
+
     // Blocked user check (optional field name in config).
     $user_block_field = $this->config->get('user_block_field');
     if ($user_block_field) {
@@ -121,22 +131,22 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       return;
     }
 
-    // Resolve asset identifier from route parameter.
-    $asset_identifier = $this->routeMatch->getParameter('asset_identifier');
-    if (!$asset_identifier || !is_string($asset_identifier)) {
+    // Resolve asset identifier from form state.
+    $asset = $form_state->get('asset');
+    if (!$asset || !is_string($asset)) {
       $this->messenger()->addError($this->t('Bad request: missing asset identifier.'));
       return;
     }
 
     // Legacy behavior: append "reader" unless it already ends with "reader".
-    $reader_name = $asset_identifier;
+    $reader_name = $asset;
     if (!preg_match('/reader$/', $reader_name)) {
       $reader_name .= 'reader';
     }
 
     // Permission policy: mirror asset id like before.
     // (Change to 'door' if you want a single shared door badge.)
-    $permission_id = $asset_identifier;
+    $permission_id = $asset;
 
     // Fetch user + card info.
     $uid = (int) $this->currentUser->id();
@@ -160,7 +170,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       'card_id'       => $card_id,
       'uid'           => $uid,
       'email'         => $email,
-      'asset_id'      => $asset_identifier,
+      'asset_id'      => $asset,
       'permission_id' => $permission_id,
       'source'        => 'website',
       'method'        => 'website',
