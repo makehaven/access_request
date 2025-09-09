@@ -49,15 +49,17 @@ class AccessRequestService {
     $asset_id = $this->routeMatch->getParameter('asset');
     $method = $request->query->get('method', 'qr');
 
+    // Check the asset map first for a reader_name override.
     $asset_map_yaml = $this->config->get('asset_map');
     $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
+    $readerKey = $asset_map[$asset_id]['reader_name'] ?? NULL;
 
-    // Prioritize reader_name from map, but fall back to asset_id.
-    $readerKey = $asset_map[$asset_id]['reader_name'] ?? $asset_id;
-
-    // Normalize to always have 'reader' suffix.
-    if (!preg_match('/reader$/', (string) $readerKey)) {
-      $readerKey .= 'reader';
+    // If no override from the map, use default normalization.
+    if ($readerKey === NULL) {
+      $readerKey = $asset_id;
+      if (!preg_match('/reader$/', $readerKey)) {
+        $readerKey .= 'reader';
+      }
     }
 
     $card_id = $this->fetchCardIdForUser($this->currentUser->id());
