@@ -153,7 +153,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     // Register the flood event after the attempt.
     $this->flood->register('access_request.form_submit', 60);
 
-    // Redirect to the front page after showing the message.
-    $form_state->setRedirect('<front>');
+    // No redirect; allow the page to reload so the user can see the message
+    // and the resend button.
   }
 }

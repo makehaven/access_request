@@ -97,13 +97,6 @@ class AccessRequestService {
     // 4) For logging clarity (what the user originally hit vs normalized)
     $asset_id = $asset_key;  // what we consider the canonical asset now
 
-    // TEMPORARY hard override for Store Door (diagnostic)
-    if (in_array($incoming, ['storedoor', 'storedoorreader'], true)) {
-      $asset_id    = 'storedoor';
-      $reader_name  = 'storedoor';
-      $permission_id = 'door'; // or 'storedoor' if that’s your policy
-    }
-
     // --- END: normalize asset & resolve reader/permission consistently ---
 
     $card_id = $this->fetchCardIdForUser($this->currentUser->id());
@@ -120,9 +113,6 @@ class AccessRequestService {
       'source'        => 'website',
       'method'        => $method,
     ];
-
-    // DEBUG: log what we're about to send
-    $this->logger->notice('DEBUG payload: ' . json_encode($payload_array));
 
     return $this->sendRequest($payload_array);
   }
