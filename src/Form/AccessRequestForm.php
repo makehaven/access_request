@@ -131,75 +131,27 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       return;
     }
 
-    // Resolve asset identifier from form state.
-    $asset = $form_state->get('asset');
-    if (!$asset || !is_string($asset)) {
-      $this->messenger()->addError($this->t('Bad request: missing asset identifier.'));
-      return;
-    }
+    // The service gets the asset from the route, so we don't need to resolve
+    // it here. The service also handles all normalization, payload creation,
+    // and the actual HTTP request. This centralizes the logic.
+    $result = $this->accessRequestService->performAccessRequest();
 
-    // Legacy behavior: append "reader" unless it already ends with "reader".
-    $reader_name = $asset;
-    if (!preg_match('/reader$/', $reader_name)) {
-      $reader_name .= 'reader';
-    }
+    // The service returns the status code and body.
+    $code = $result['http_status'];
+    $body = $result['body'];
 
-    // Permission policy: mirror asset id like before.
-    // (Change to 'door' if you want a single shared door badge.)
-    $permission_id = $asset;
-
-    // Fetch user + card info.
-    $uid = (int) $this->currentUser->id();
-    $email = method_exists($this->currentUser, 'getEmail') ? (string) $this->currentUser->getEmail() : '';
-
-    $card_id = $this->accessRequestService->fetchCardIdForUser($uid);
-    if (empty($card_id)) {
-      $this->messenger()->addError($this->t('No card found associated with your account. Please contact support.'));
-      return;
-    }
-
-    // Endpoint from config; fallback to dev if not set.
-    $endpoint = (string) ($this->config->get('endpoint_url') ?? '');
-    if ($endpoint === '') {
-      $endpoint = 'https://server.dev.access.makehaven.org/toolauth/req';
-    }
-
-    // Build legacy-style payload (richer for logging and clarity).
-    $payload = [
-      'reader_name'   => $reader_name,
-      'card_id'       => $card_id,
-      'uid'           => $uid,
-      'email'         => $email,
-      'asset_id'      => $asset,
-      'permission_id' => $permission_id,
-      'source'        => 'website',
-      'method'        => 'website',
-    ];
-
-    try {
-      $client = \Drupal::httpClient();
-      $res = $client->post($endpoint, [
-        'headers' => [
-          'Accept' => 'text/plain',
-          'Content-Type' => 'application/json',
-        ],
-        'json' => $payload,
-        'http_errors' => TRUE, // Let Guzzle throw exceptions on 4xx/5xx.
-        'timeout' => 8,
-      ]);
-
+    // The service respects dry_run mode, so we just need to handle the result.
+    if ($code === 201) {
       $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
-      $this->flood->register('access_request.form_submit', 60);
-
-    } catch (\GuzzleHttp\Exception\RequestException $e) {
-      $code = $e->getResponse() ? $e->getResponse()->getStatusCode() : 500;
-      $body = $e->getResponse() ? (string) $e->getResponse()->getBody() : $e->getMessage();
-      \Drupal::logger('access_request')->error('Access request failed with code @code: @body', ['@code' => $code, '@body' => $body]);
-      $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
-    } catch (\Throwable $e) {
-      \Drupal::logger('access_request')->error('Access request failed: @m', ['@m' => $e->getMessage()]);
-      $this->messenger()->addError($this->t('Access system error. Please try again or contact an admin.'));
     }
+    else {
+      // Use the improved error message from the user's instructions.
+      // The service log already contains the full details.
+      $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
+    }
+
+    // Register the flood event after the attempt.
+    $this->flood->register('access_request.form_submit', 60);
 
     // Redirect to the front page after showing the message.
     $form_state->setRedirect('<front>');
