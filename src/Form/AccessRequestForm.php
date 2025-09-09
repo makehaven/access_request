@@ -184,38 +184,21 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
           'Content-Type' => 'application/json',
         ],
         'json' => $payload,
-        'http_errors' => FALSE,
+        'http_errors' => TRUE, // Let Guzzle throw exceptions on 4xx/5xx.
         'timeout' => 8,
       ]);
 
-      $code = $res->getStatusCode();
+      $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
       $this->flood->register('access_request.form_submit', 60);
 
-      switch ($code) {
-        case 201:
-          $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
-          break;
-
-        case 403:
-          $this->messenger()->addError($this->t('Access denied: missing required badge/permission.'));
-          break;
-
-        case 401:
-          $this->messenger()->addError($this->t('Unauthorized card format or number.'));
-          break;
-
-        case 400:
-          $this->messenger()->addError($this->t('Bad request: unknown reader. Check the QR’s reader key or server config.'));
-          break;
-
-        default:
-          $this->messenger()->addError($this->t('Access system error (HTTP @c). Try again or contact an admin.', ['@c' => $code]));
-          break;
-      }
-    }
-    catch (\Throwable $e) {
-      $this->messenger()->addError($this->t('Access system error. Please try again or contact an admin.'));
+    } catch (\GuzzleHttp\Exception\RequestException $e) {
+      $code = $e->getResponse() ? $e->getResponse()->getStatusCode() : 500;
+      $body = $e->getResponse() ? (string) $e->getResponse()->getBody() : $e->getMessage();
+      \Drupal::logger('access_request')->error('Access request failed with code @code: @body', ['@code' => $code, '@body' => $body]);
+      $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
+    } catch (\Throwable $e) {
       \Drupal::logger('access_request')->error('Access request failed: @m', ['@m' => $e->getMessage()]);
+      $this->messenger()->addError($this->t('Access system error. Please try again or contact an admin.'));
     }
 
     // Redirect to the front page after showing the message.
