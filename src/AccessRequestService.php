@@ -210,7 +210,6 @@ class AccessRequestService {
       $http_status = $response->getStatusCode();
       $response_body = $response->getBody()->getContents();
       $result = ($http_status === 201) ? 'allowed' : 'denied';
-    }
     } catch (\GuzzleHttp\Exception\RequestException $e) {
       $latency = microtime(TRUE) - $start_time;
       $result = 'error';
