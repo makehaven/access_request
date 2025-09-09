@@ -45,34 +45,73 @@ class AccessRequestService {
    * Performs the access request.
    */
   public function performAccessRequest() {
-    $request = $this->requestStack->getCurrentRequest();
-    $asset_id = $this->routeMatch->getParameter('asset');
-    $method = $request->query->get('method', 'qr');
+    // --- BEGIN: normalize asset & resolve reader/permission consistently ---
 
-    // Check the asset map first for a reader_name override.
-    $asset_map_yaml = $this->config->get('asset_map');
-    $asset_map = Yaml::parse((string) $asset_map_yaml) ?? [];
-    $readerKey = $asset_map[$asset_id]['reader_name'] ?? NULL;
+    // Route param from /access-request/asset/{asset}
+    $incoming = (string) $this->routeMatch->getParameter('asset');   // e.g., "storedoorreader" or "storedoor"
 
-    // If no override from the map, use default normalization.
-    if ($readerKey === NULL) {
-      $readerKey = $asset_id;
-      if (!preg_match('/reader$/', $readerKey)) {
-        $readerKey .= 'reader';
+    // Parse asset_map YAML from config.
+    $map = [];
+    $asset_map_yaml = (string) ($this->config->get('asset_map') ?? '');
+    if ($asset_map_yaml !== '') {
+      try {
+        $parsed = \Symfony\Component\Yaml\Yaml::parse($asset_map_yaml);
+        if (is_array($parsed)) { $map = $parsed; }
+      } catch (\Throwable $e) {
+        // non-fatal; leave $map empty
       }
     }
 
+    // 1) Normalize to a known asset key:
+    //    - prefer exact match
+    //    - else if incoming ends with 'reader', strip it and try again
+    $asset_key = $incoming;
+    if (!array_key_exists($asset_key, $map)) {
+      if (preg_match('/reader$/', $asset_key)) {
+        $maybe = preg_replace('/reader$/', '', $asset_key);
+        if (is_string($maybe) && array_key_exists($maybe, $map)) {
+          $asset_key = $maybe; // e.g., "storedoorreader" -> "storedoor"
+        }
+      }
+    }
+
+    // 2) Reader resolution precedence:
+    //    a) asset_map[asset_key].reader_name (explicit override)
+    //    b) asset_key (NO automatic suffixing; backend naming is canonical)
+    $reader_name = $asset_key;
+    if (isset($map[$asset_key]['reader_name']) && is_string($map[$asset_key]['reader_name'])) {
+      $reader_name = $map[$asset_key]['reader_name'];
+    }
+
+    // 3) Permission resolution precedence:
+    //    a) asset_map[asset_key].permission_id
+    //    b) category === 'doors' -> 'door' (shared badge default)
+    //    c) fallback to asset_key
+    $permission_id = $asset_key;
+    if (isset($map[$asset_key]['permission_id']) && is_string($map[$asset_key]['permission_id'])) {
+      $permission_id = $map[$asset_key]['permission_id'];
+    } elseif ((string) ($map[$asset_key]['category'] ?? '') === 'doors') {
+      $permission_id = 'door';
+    }
+
+    // 4) For logging clarity (what the user originally hit vs normalized)
+    $asset_id = $asset_key;  // what we consider the canonical asset now
+
+    // --- END: normalize asset & resolve reader/permission consistently ---
+
     $card_id = $this->fetchCardIdForUser($this->currentUser->id());
+    $request = $this->requestStack->getCurrentRequest();
+    $method = $request->query->get('method', 'website');
 
     $payload_array = [
-      'reader_name' => $readerKey,
-      'card_id' => $card_id ?? '',
-      // Optional metadata for logs.
-      'uid' => $this->currentUser->id(),
-      'email' => $this->currentUser->getEmail(),
-      'asset_id' => $asset_id,
-      'permission_id' => $this->getPermissionId($asset_id),
-      'source' => $method,
+      'reader_name'   => $reader_name,
+      'card_id'       => $card_id,
+      'uid'           => $this->currentUser->id(),
+      'email'         => $this->currentUser->getEmail(),
+      'asset_id'      => $asset_id,
+      'permission_id' => $permission_id,
+      'source'        => 'website',
+      'method'        => $method,
     ];
 
     return $this->sendRequest($payload_array);
