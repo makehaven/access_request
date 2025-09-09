@@ -77,10 +77,16 @@ class AccessRequestService {
 
     // 2) Reader resolution precedence:
     //    a) asset_map[asset_key].reader_name (explicit override)
-    //    b) asset_key (NO automatic suffixing; backend naming is canonical)
-    $reader_name = $asset_key;
+    //    b) asset_key, with 'reader' suffix appended if not present
     if (isset($map[$asset_key]['reader_name']) && is_string($map[$asset_key]['reader_name'])) {
+      // a) Explicit override from map. Use it as-is.
       $reader_name = $map[$asset_key]['reader_name'];
+    } else {
+      // b) Default legacy behavior: asset key + suffix if needed.
+      $reader_name = $asset_key;
+      if (!preg_match('/reader$/', $reader_name)) {
+        $reader_name .= 'reader';
+      }
     }
 
     // 3) Permission resolution precedence:

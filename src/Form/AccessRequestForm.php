@@ -15,7 +15,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
- * Access request form that auto-submits and delegates logic to the service.
+ * Access request form that auto-submits and restores legacy reader naming.
  */
 class AccessRequestForm extends FormBase implements ContainerInjectionInterface {
 
@@ -78,7 +78,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       return new RedirectResponse($url->toString());
     }
 
-    // Store the asset for the submit handler (useful for logging/UI only).
+    // Store the asset for the submit handler.
     $form_state->set('asset', $asset);
 
     // Blocked user check (optional field name in config).
@@ -131,31 +131,23 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       return;
     }
 
-    // Delegate to the service (it resolves the route param {asset}, normalizes,
-    // builds payload, honors dry_run, and posts to the backend).
+    // The service gets the asset from the route, so we don't need to resolve
+    // it here. The service also handles all normalization, payload creation,
+    // and the actual HTTP request. This centralizes the logic.
     $result = $this->accessRequestService->performAccessRequest();
 
-    $code = $result['http_status'] ?? 500;
-    $body = $result['body'] ?? '';
+    // The service returns the status code and body.
+    $code = $result['http_status'];
+    $body = $result['body'];
 
+    // The service respects dry_run mode, so we just need to handle the result.
     if ($code === 201) {
       $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
     }
-    elseif ($code === 403) {
-      $this->messenger()->addError($this->t('Access denied: missing required badge/permission.'));
-    }
-    elseif ($code === 401) {
-      $this->messenger()->addError($this->t('Unauthorized card format or number.'));
-    }
-    elseif ($code === 400) {
-      $this->messenger()->addError($this->t('Bad request: unknown reader. Check the QR’s reader key or server config.'));
-    }
     else {
-      // During troubleshooting, surface a short backend message for 5xx.
-      $this->messenger()->addError($this->t(
-        'Access system error (HTTP @c): @m',
-        ['@c' => $code, '@m' => mb_substr((string) $body, 0, 300)]
-      ));
+      // Use the improved error message from the user's instructions.
+      // The service log already contains the full details.
+      $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
     }
 
     // Register the flood event after the attempt.
