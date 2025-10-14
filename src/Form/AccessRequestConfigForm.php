@@ -61,6 +61,26 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('user_block_field'),
     ];
 
+    $form['denial_messages'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Denial Messages'),
+      '#description' => $this->t('Configure custom messages for specific denial reasons.'),
+    ];
+
+    $form['denial_messages']['unpaid_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Unpaid Users'),
+      '#description' => $this->t('This message will be shown to users whose access is denied because their account is marked as having a failed payment. You can use the token <code>[payment_portal_button]</code> to insert a link to the payment portal.'),
+      '#default_value' => $config->get('unpaid_message'),
+    ];
+
+    $form['denial_messages']['payment_portal_url'] = [
+      '#type' => 'url',
+      '#title' => $this->t('Payment Portal URL'),
+      '#description' => $this->t('The URL for the button that directs users to update their payment information. The button is inserted into the "Message for Unpaid Users" via the <code>[payment_portal_button]</code> token.'),
+      '#default_value' => $config->get('payment_portal_url'),
+    ];
+
     $form['view_assets_link'] = [
       '#markup' => $this->t('<a href=":url">View configured assets</a>', [':url' => Url::fromRoute('access_request.list')->toString()]),
     ];
@@ -93,6 +113,8 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))
+      ->set('unpaid_message', $form_state->getValue('unpaid_message'))
+      ->set('payment_portal_url', $form_state->getValue('payment_portal_url'))
       ->save();
 
     parent::submitForm($form, $form_state);

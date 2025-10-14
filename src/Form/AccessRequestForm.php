@@ -13,6 +13,8 @@ use Drupal\Core\Flood\FloodInterface;
 use Drupal\access_request\AccessRequestService;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Render\RendererInterface;
 
 /**
  * Access request form that auto-submits and restores legacy reader naming.
@@ -34,18 +36,28 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
   /** @var \Drupal\Core\Routing\RouteMatchInterface */
   protected $routeMatch;
 
+  /** @var \Drupal\Core\Entity\EntityTypeManagerInterface */
+  protected $entityTypeManager;
+
+  /** @var \Drupal\Core\Render\RendererInterface */
+  protected $renderer;
+
   public function __construct(
     ConfigFactoryInterface $config_factory,
     AccessRequestService $access_request_service,
     FloodInterface $flood,
     AccountInterface $current_user,
-    RouteMatchInterface $route_match
+    RouteMatchInterface $route_match,
+    EntityTypeManagerInterface $entity_type_manager,
+    RendererInterface $renderer
   ) {
     $this->config = $config_factory->get('access_request.settings');
     $this->accessRequestService = $access_request_service;
     $this->flood = $flood;
     $this->currentUser = $current_user;
     $this->routeMatch = $route_match;
+    $this->entityTypeManager = $entity_type_manager;
+    $this->renderer = $renderer;
   }
 
   public static function create(ContainerInterface $container) {
@@ -54,7 +66,9 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       $container->get('access_request.service'),
       $container->get('flood'),
       $container->get('current_user'),
-      $container->get('current_route_match')
+      $container->get('current_route_match'),
+      $container->get('entity_type.manager'),
+      $container->get('renderer')
     );
   }
 
@@ -145,9 +159,39 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
     }
     else {
-      // Use the improved error message from the user's instructions.
-      // The service log already contains the full details.
-      $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
+      $user = $this->entityTypeManager->getStorage('user')->load($this->currentUser->id());
+      if ($user && $user->hasField('field_payment_failed') && (bool) $user->get('field_payment_failed')->value) {
+        $unpaid_message = $this->config->get('unpaid_message');
+
+        if (!empty($unpaid_message)) {
+          $payment_portal_url = $this->config->get('payment_portal_url');
+          $button = '';
+
+          if (!empty($payment_portal_url) && strpos($unpaid_message, '[payment_portal_button]') !== false) {
+            $url = Url::fromUri($payment_portal_url);
+            $button_link = [
+              '#type' => 'link',
+              '#title' => $this->t('Update Payment Information'),
+              '#url' => $url,
+              '#attributes' => [
+                'class' => ['button', 'button--primary'],
+              ],
+            ];
+            $button = $this->renderer->render($button_link);
+          }
+
+          $message = str_replace('[payment_portal_button]', $button, $unpaid_message);
+          $this->messenger()->addErrorMarkup($message);
+        }
+        else {
+          $this->messenger()->addError($this->t('Your account has been flagged as unpaid. Please update your payment information.'));
+        }
+      }
+      else {
+        // Use the improved error message from the user's instructions.
+        // The service log already contains the full details.
+        $this->messenger()->addError($this->t('Access system error (HTTP @c): @m', ['@c' => $code, '@m' => mb_substr($body, 0, 300)]));
+      }
     }
 
     // Register the flood event after the attempt.
