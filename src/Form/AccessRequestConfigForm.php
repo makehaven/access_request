@@ -61,6 +61,68 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('user_block_field'),
     ];
 
+    $form['user_settings']['user_block_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('User Block Message'),
+      '#description' => $this->t('Message to show to a user who is blocked by the User Block Field. This check happens before the gateway request is made.'),
+      '#default_value' => $config->get('user_block_message'),
+    ];
+
+    $form['denial_messages'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Denial Messages'),
+      '#description' => $this->t('Configure custom messages for specific denial reasons. All message fields support the <code>[payment_portal_button]</code> token.'),
+    ];
+
+    $form['denial_messages']['default_denial_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Default Denial Message'),
+      '#description' => $this->t('The default message to show when access is denied for a generic reason.'),
+      '#default_value' => $config->get('default_denial_message'),
+    ];
+
+    $form['denial_messages']['unpaid_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Unpaid Users (Payment Failed)'),
+      '#description' => $this->t('Based on the <code>field_payment_failed</code> boolean field.'),
+      '#default_value' => $config->get('unpaid_message'),
+    ];
+
+    $form['denial_messages']['manual_pause_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Manual Pause'),
+      '#description' => $this->t('Based on the <code>field_manual_pause</code> boolean field.'),
+      '#default_value' => $config->get('manual_pause_message'),
+    ];
+
+    $form['denial_messages']['chargebee_pause_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Chargebee Pause'),
+      '#description' => $this->t('Based on the <code>field_chargebee_payment_pause</code> boolean field.'),
+      '#default_value' => $config->get('chargebee_pause_message'),
+    ];
+
+    $form['denial_messages']['override_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Access Override'),
+      '#description' => $this->t('Based on the <code>field_access_override</code> list field having the value "deny".'),
+      '#default_value' => $config->get('override_message'),
+    ];
+
+    $form['denial_messages']['no_member_role_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Message for Missing Member Role'),
+      '#description' => $this->t('Shown when the user does not have the "member" role.'),
+      '#default_value' => $config->get('no_member_role_message'),
+    ];
+
+    $form['denial_messages']['payment_portal_url'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Payment Portal URL'),
+      '#description' => $this->t('The URL or internal path (e.g., /portal) for the button that directs users to update their payment information. The button is inserted into the "Message for Unpaid Users" via the <code>[payment_portal_button]</code> token.'),
+      '#default_value' => $config->get('payment_portal_url'),
+    ];
+
     $form['view_assets_link'] = [
       '#markup' => $this->t('<a href=":url">View configured assets</a>', [':url' => Url::fromRoute('access_request.list')->toString()]),
     ];
@@ -93,6 +155,14 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))
+      ->set('user_block_message', $form_state->getValue('user_block_message'))
+      ->set('unpaid_message', $form_state->getValue('unpaid_message'))
+      ->set('payment_portal_url', $form_state->getValue('payment_portal_url'))
+      ->set('default_denial_message', $form_state->getValue('default_denial_message'))
+      ->set('manual_pause_message', $form_state->getValue('manual_pause_message'))
+      ->set('chargebee_pause_message', $form_state->getValue('chargebee_pause_message'))
+      ->set('override_message', $form_state->getValue('override_message'))
+      ->set('no_member_role_message', $form_state->getValue('no_member_role_message'))
       ->save();
 
     parent::submitForm($form, $form_state);
