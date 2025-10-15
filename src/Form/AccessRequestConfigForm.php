@@ -75,9 +75,9 @@ class AccessRequestConfigForm extends ConfigFormBase {
     ];
 
     $form['denial_messages']['payment_portal_url'] = [
-      '#type' => 'url',
+      '#type' => 'textfield',
       '#title' => $this->t('Payment Portal URL'),
-      '#description' => $this->t('The URL for the button that directs users to update their payment information. The button is inserted into the "Message for Unpaid Users" via the <code>[payment_portal_button]</code> token.'),
+      '#description' => $this->t('The URL or internal path (e.g., /portal) for the button that directs users to update their payment information. The button is inserted into the "Message for Unpaid Users" via the <code>[payment_portal_button]</code> token.'),
       '#default_value' => $config->get('payment_portal_url'),
     ];
 

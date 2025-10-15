@@ -15,6 +15,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Render\RendererInterface;
+use Drupal\Core\Render\Markup;
 
 /**
  * Access request form that auto-submits and restores legacy reader naming.
@@ -168,7 +169,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
           $button = '';
 
           if (!empty($payment_portal_url) && strpos($unpaid_message, '[payment_portal_button]') !== false) {
-            $url = Url::fromUri($payment_portal_url);
+            $url = Url::fromUserInput($payment_portal_url);
             $button_link = [
               '#type' => 'link',
               '#title' => $this->t('Update Payment Information'),
@@ -181,7 +182,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
           }
 
           $message = str_replace('[payment_portal_button]', $button, $unpaid_message);
-          $this->messenger()->addErrorMarkup($message);
+          $this->messenger()->addError(Markup::create($message));
         }
         else {
           $this->messenger()->addError($this->t('Your account has been flagged as unpaid. Please update your payment information.'));
