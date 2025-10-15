@@ -61,6 +61,13 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('user_block_field'),
     ];
 
+    $form['user_settings']['user_block_message'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('User Block Message'),
+      '#description' => $this->t('Message to show to a user who is blocked by the User Block Field. This check happens before the gateway request is made.'),
+      '#default_value' => $config->get('user_block_message'),
+    ];
+
     $form['denial_messages'] = [
       '#type' => 'fieldset',
       '#title' => $this->t('Denial Messages'),
@@ -68,7 +75,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
     ];
 
     $form['denial_messages']['default_denial_message'] = [
-      '#type' => 'textfield',
+      '#type' => 'textarea',
       '#title' => $this->t('Default Denial Message'),
       '#description' => $this->t('The default message to show when access is denied for a generic reason.'),
       '#default_value' => $config->get('default_denial_message'),
@@ -148,6 +155,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))
+      ->set('user_block_message', $form_state->getValue('user_block_message'))
       ->set('unpaid_message', $form_state->getValue('unpaid_message'))
       ->set('payment_portal_url', $form_state->getValue('payment_portal_url'))
       ->set('default_denial_message', $form_state->getValue('default_denial_message'))

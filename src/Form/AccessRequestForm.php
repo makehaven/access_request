@@ -100,9 +100,10 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $user_block_field = $this->config->get('user_block_field');
     if ($user_block_field) {
       /** @var \Drupal\user\UserInterface $user */
-      $user = \Drupal\user\Entity\User::load($this->currentUser->id());
+      $user = $this->entityTypeManager->getStorage('user')->load($this->currentUser->id());
       if ($user && $user->hasField($user_block_field) && (bool) $user->get($user_block_field)->value) {
-        $this->messenger()->addError($this->t('Your access to this system has been revoked. Please contact an administrator.'));
+        $message = $this->config->get('user_block_message') ?: $this->t('Your access to this system has been revoked. Please contact an administrator.');
+        $this->messenger()->addError($message);
         return [];
       }
     }
