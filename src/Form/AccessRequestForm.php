@@ -169,7 +169,12 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
           $button = '';
 
           if (!empty($payment_portal_url) && strpos($unpaid_message, '[payment_portal_button]') !== false) {
-            $url = Url::fromUserInput($payment_portal_url);
+            if (filter_var($payment_portal_url, FILTER_VALIDATE_URL)) {
+              $url = Url::fromUri($payment_portal_url);
+            }
+            else {
+              $url = Url::fromUserInput($payment_portal_url);
+            }
             $button_link = [
               '#type' => 'link',
               '#title' => $this->t('Update Payment Information'),
