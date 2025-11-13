@@ -7,6 +7,15 @@ access_request.asset:
     _permission: 'request tool access'
     asset: '^[a-z0-9_-]+$'
 
+access_request.initiate:
+  path: '/access-request/initiate/{asset}'
+  defaults:
+    _controller: '\Drupal\access_request\Controller\AccessRequestController::initiateRequest'
+    _title: 'Initiate Access Request'
+  requirements:
+    _permission: 'request tool access'
+    asset: '^[a-z0-9_-]+$'
+
 access_request.proxy:
   path: '/access-request-proxy'
   defaults:
