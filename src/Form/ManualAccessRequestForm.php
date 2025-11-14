@@ -12,7 +12,6 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Flood\FloodInterface;
 use Drupal\access_request\AccessRequestService;
 use Drupal\Core\Session\AccountInterface;
-use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Render\RendererInterface;
 use Drupal\Core\Render\Markup;
@@ -29,14 +28,10 @@ class ManualAccessRequestForm extends FormBase implements ContainerInjectionInte
   protected $accessRequestService;
 
   /** @var \Drupal\Core\Flood\FloodInterface */
-  protected
-$flood;
+  protected $flood;
 
   /** @var \Drupal\Core\Session\AccountInterface */
   protected $currentUser;
-
-  /** @var \Drupal\Core\Routing\RouteMatchInterface */
-  protected $routeMatch;
 
   /** @var \Drupal\Core\Entity\EntityTypeManagerInterface */
   protected $entityTypeManager;
@@ -49,7 +44,6 @@ $flood;
     AccessRequestService $access_request_service,
     FloodInterface $flood,
     AccountInterface $current_user,
-    RouteMatchInterface $route_match,
     EntityTypeManagerInterface $entity_type_manager,
     RendererInterface $renderer
   ) {
@@ -57,7 +51,6 @@ $flood;
     $this->accessRequestService = $access_request_service;
     $this->flood = $flood;
     $this->currentUser = $current_user;
-    $this->routeMatch = $route_match;
     $this->entityTypeManager = $entity_type_manager;
     $this->renderer = $renderer;
   }
@@ -68,7 +61,6 @@ $flood;
       $container->get('access_request.service'),
       $container->get('flood'),
       $container->get('current_user'),
-      $container->get('current_route_match'),
       $container->get('entity_type.manager'),
       $container->get('renderer')
     );

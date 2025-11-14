@@ -12,10 +12,10 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Flood\FloodInterface;
 use Drupal\access_request\AccessRequestService;
 use Drupal\Core\Session\AccountInterface;
-use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Render\RendererInterface;
 use Drupal\Core\Render\Markup;
+use Symfony\Component\Routing\Exception\RouteNotFoundException;
 
 /**
  * Access request form that auto-submits and restores legacy reader naming.
@@ -34,9 +34,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
   /** @var \Drupal\Core\Session\AccountInterface */
   protected $currentUser;
 
-  /** @var \Drupal\Core\Routing\RouteMatchInterface */
-  protected $routeMatch;
-
   /** @var \Drupal\Core\Entity\EntityTypeManagerInterface */
   protected $entityTypeManager;
 
@@ -48,7 +45,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     AccessRequestService $access_request_service,
     FloodInterface $flood,
     AccountInterface $current_user,
-    RouteMatchInterface $route_match,
     EntityTypeManagerInterface $entity_type_manager,
     RendererInterface $renderer
   ) {
@@ -56,7 +52,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $this->accessRequestService = $access_request_service;
     $this->flood = $flood;
     $this->currentUser = $current_user;
-    $this->routeMatch = $route_match;
     $this->entityTypeManager = $entity_type_manager;
     $this->renderer = $renderer;
   }
@@ -67,7 +62,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       $container->get('access_request.service'),
       $container->get('flood'),
       $container->get('current_user'),
-      $container->get('current_route_match'),
       $container->get('entity_type.manager'),
       $container->get('renderer')
     );
@@ -123,9 +117,20 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
       return [];
     }
 
-    // Auto-submit on first load.
+    // Auto-submit on first load, then forward to the manual form so the user
+    // lands on a page with an explicit resend button instead of another
+    // automatic submission.
     if (!$form_state->isSubmitted()) {
       $this->submitForm($form, $form_state);
+
+      try {
+        $manual_url = Url::fromRoute('access_request.manual', ['asset' => $asset]);
+      }
+      catch (RouteNotFoundException $e) {
+        // Fall back to a direct path if routing metadata is stale.
+        $manual_url = Url::fromUserInput("/access-request/manual/{$asset}");
+      }
+      return new RedirectResponse($manual_url->toString());
     }
 
     // Fallback manual resubmit button.
@@ -202,10 +207,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     // Register the flood event after the attempt.
     $this->flood->register('access_request.form_submit', 60);
 
-    // Redirect to the manual page.
-    $asset = $this->routeMatch->getParameter('asset');
-    $url = Url::fromRoute('access_request.manual', ['asset' => $asset]);
-    $form_state->setRedirectUrl($url);
   }
 
   /**
