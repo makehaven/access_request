@@ -18,9 +18,9 @@ use Drupal\Core\Render\RendererInterface;
 use Drupal\Core\Render\Markup;
 
 /**
- * Access request form that auto-submits and restores legacy reader naming.
+ * Access request form for manual submissions.
  */
-class AccessRequestForm extends FormBase implements ContainerInjectionInterface {
+class ManualAccessRequestForm extends FormBase implements ContainerInjectionInterface {
 
   /** @var \Drupal\Core\Config\ImmutableConfig */
   protected $config;
@@ -29,7 +29,8 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
   protected $accessRequestService;
 
   /** @var \Drupal\Core\Flood\FloodInterface */
-  protected $flood;
+  protected
+$flood;
 
   /** @var \Drupal\Core\Session\AccountInterface */
   protected $currentUser;
@@ -77,7 +78,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
    * {@inheritdoc}
    */
   public function getFormId() {
-    return 'access_request_form';
+    return 'manual_access_request_form';
   }
 
   /**
@@ -121,11 +122,6 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     if (empty($card_id)) {
       $this->messenger()->addError($this->t('No card found associated with your account. Please contact support.'));
       return [];
-    }
-
-    // Auto-submit on first load.
-    if (!$form_state->isSubmitted()) {
-      $this->submitForm($form, $form_state);
     }
 
     // Fallback manual resubmit button.
@@ -202,10 +198,8 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     // Register the flood event after the attempt.
     $this->flood->register('access_request.form_submit', 60);
 
-    // Redirect to the manual page.
-    $asset = $this->routeMatch->getParameter('asset');
-    $url = Url::fromRoute('access_request.manual', ['asset' => $asset]);
-    $form_state->setRedirectUrl($url);
+    // No redirect; allow the page to reload so the user can see the message
+    // and the resend button.
   }
 
   /**
