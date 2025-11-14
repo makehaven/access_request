@@ -7,6 +7,15 @@ access_request.asset:
     _permission: 'request tool access'
     asset: '^[a-z0-9_-]+$'
 
+access_request.manual:
+  path: '/access-request/manual/{asset}'
+  defaults:
+    _form: '\Drupal\access_request\Form\ManualAccessRequestForm'
+    _title: 'Access Request'
+  requirements:
+    _permission: 'request tool access'
+    asset: '^[a-z0-9_-]+$'
+
 access_request.proxy:
   path: '/access-request-proxy'
   defaults:
