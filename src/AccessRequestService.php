@@ -12,11 +12,21 @@ use GuzzleHttp\Exception\RequestException;
 use Symfony\Component\Yaml\Yaml;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\State\StateInterface;
 
 /**
  * Service for handling access requests.
  */
 class AccessRequestService {
+
+  // Circuit breaker states.
+  const CIRCUIT_CLOSED = 'closed';
+  const CIRCUIT_OPEN = 'open';
+  const CIRCUIT_HALF_OPEN = 'half_open';
+
+  // Circuit breaker configuration (can be made configurable in settings).
+  const FAILURE_THRESHOLD = 3; // Number of consecutive failures before opening the circuit.
+  const RESET_TIMEOUT = 60;    // Time in seconds to stay in open state before attempting half-open.
 
   protected $config;
   protected $logger;
@@ -26,11 +36,12 @@ class AccessRequestService {
   protected $uuid;
   protected $requestStack;
   protected $routeMatch;
+  protected StateInterface $state;
 
   /**
    * Constructs an AccessRequestService object.
    */
-  public function __construct(ConfigFactoryInterface $config_factory, LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid, RequestStack $request_stack, RouteMatchInterface $route_match) {
+  public function __construct(ConfigFactoryInterface $config_factory, LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid, RequestStack $request_stack, RouteMatchInterface $route_match, StateInterface $state) {
     $this->config = $config_factory->get('access_request.settings');
     $this->logger = $logger_factory->get('access_request');
     $this->httpClient = $http_client;
@@ -39,6 +50,7 @@ class AccessRequestService {
     $this->uuid = $uuid;
     $this->requestStack = $request_stack;
     $this->routeMatch = $route_match;
+    $this->state = $state;
   }
 
   /**
@@ -163,6 +175,31 @@ class AccessRequestService {
     $timeout = $this->config->get('timeout_seconds');
     $hmac_secret = $this->config->get('web_hmac_secret');
     $request_id = $this->uuid->generate();
+    $current_time = \Drupal::time()->getRequestTime();
+
+    // Circuit breaker state management.
+    $circuit_state_key = 'access_request.circuit_state';
+    $failure_count_key = 'access_request.failure_count';
+    $last_failure_time_key = 'access_request.last_failure_time';
+
+    $circuit_state = $this->state->get($circuit_state_key, self::CIRCUIT_CLOSED);
+    $failure_count = $this->state->get($failure_count_key, 0);
+    $last_failure_time = $this->state->get($last_failure_time_key, 0);
+
+    // Check circuit state before making request.
+    if ($circuit_state === self::CIRCUIT_OPEN) {
+      if ($current_time < $last_failure_time + self::RESET_TIMEOUT) {
+        // Circuit is open, and reset timeout has not passed. Fail fast.
+        $this->logger->warning('Circuit breaker is OPEN. Failing fast for external request. Request ID: @request_id', ['@request_id' => $request_id]);
+        return ['http_status' => 503, 'body' => 'Circuit breaker is OPEN. External service unavailable.'];
+      }
+      else {
+        // Reset timeout has passed. Transition to HALF_OPEN.
+        $circuit_state = self::CIRCUIT_HALF_OPEN;
+        $this->state->set($circuit_state_key, $circuit_state);
+        $this->logger->notice('Circuit breaker transitioned to HALF_OPEN. Attempting request. Request ID: @request_id', ['@request_id' => $request_id]);
+      }
+    }
 
     $headers = ['Content-Type' => 'application/json'];
     // The gateway only requires reader_name and card_id.
@@ -194,6 +231,11 @@ class AccessRequestService {
       '@reader_name' => $payload_array['reader_name'],
     ];
 
+    $success = FALSE;
+    $circuit_failure = FALSE;
+    $http_status = 500;
+    $response_body = '';
+
     try {
       $response = $this->httpClient->request('POST', $url, [
         'headers' => $headers,
@@ -205,17 +247,51 @@ class AccessRequestService {
       $latency = microtime(TRUE) - $start_time;
       $http_status = $response->getStatusCode();
       $response_body = $response->getBody()->getContents();
-      $result = ($http_status === 201) ? 'allowed' : 'denied';
+      $result = ($http_status >= 200 && $http_status < 300) ? 'allowed' : 'denied';
+
+      if ($http_status >= 200 && $http_status < 300) {
+        $success = TRUE;
+      }
+      elseif ($http_status >= 500) {
+        // Upstream service/server failure.
+        $circuit_failure = TRUE;
+      }
     } catch (\GuzzleHttp\Exception\RequestException $e) {
       $latency = microtime(TRUE) - $start_time;
       $result = 'error';
       $http_status = $e->getResponse() ? $e->getResponse()->getStatusCode() : 500;
       $response_body = $e->getResponse() ? (string) $e->getResponse()->getBody() : $e->getMessage();
+      // Network/transport failures and 5xx responses indicate upstream health
+      // issues and should contribute to opening the circuit.
+      $circuit_failure = !$e->getResponse() || $http_status >= 500;
     } catch (\Throwable $e) {
       $latency = microtime(TRUE) - $start_time;
       $result = 'error';
       $http_status = 500;
       $response_body = $e->getMessage();
+      $circuit_failure = TRUE;
+    }
+
+    // Update circuit breaker state based on request outcome.
+    if (!$circuit_failure) {
+      $this->state->set($failure_count_key, 0);
+      $this->state->set($circuit_state_key, self::CIRCUIT_CLOSED);
+      if ($success) {
+        $this->logger->info('Circuit breaker is CLOSED. Request ID: @request_id', ['@request_id' => $request_id]);
+      }
+    }
+    else {
+      $failure_count++;
+      $this->state->set($failure_count_key, $failure_count);
+      if ($failure_count >= self::FAILURE_THRESHOLD) {
+        $this->state->set($circuit_state_key, self::CIRCUIT_OPEN);
+        $this->state->set($last_failure_time_key, $current_time);
+        $this->logger->error('Circuit breaker opened due to @count consecutive failures. Request ID: @request_id', ['@count' => $failure_count, '@request_id' => $request_id]);
+      }
+      else {
+        $this->state->set($circuit_state_key, self::CIRCUIT_CLOSED); // Remain closed until threshold.
+        $this->logger->warning('Circuit breaker failure count: @count. Request ID: @request_id', ['@count' => $failure_count, '@request_id' => $request_id]);
+      }
     }
 
     $log_context['@http_status'] = $http_status;

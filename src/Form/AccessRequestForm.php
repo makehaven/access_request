@@ -162,7 +162,7 @@ class AccessRequestForm extends FormBase implements ContainerInjectionInterface 
     $body = $result['body'];
 
     // The service respects dry_run mode, so we just need to handle the result.
-    if ($code === 201) {
+    if ($code >= 200 && $code < 300) {
       $this->messenger()->addStatus($this->t('Card accepted. Door/tool enabled.'));
     }
     else {
