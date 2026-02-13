@@ -306,4 +306,18 @@ class AccessRequestService {
 
     return ['http_status' => $http_status, 'body' => $response_body];
   }
+
+  /**
+   * Forwards externally sourced access checks through the gateway pipeline.
+   *
+   * @param array $payload_array
+   *   Expected keys include reader_name, card_id, uid, email, asset_id,
+   *   permission_id, source, and method.
+   *
+   * @return array
+   *   Gateway response array with at least http_status and body.
+   */
+  public function forwardExternalRequest(array $payload_array): array {
+    return $this->sendRequest($payload_array);
+  }
 }
