@@ -81,9 +81,20 @@ functional and is the default until you opt an asset in.
    backdoor:
      name: Back Door
      category: doors
-     ha_service: esphome.backdooractivator_enable
+     ha_service: script.drupal_unlock_backdoor
      backend: home_assistant
    ```
+
+   The default asset map points `ha_service:` at **HA scripts** named
+   `script.drupal_unlock_<door>`, not directly at `esphome.*_enable`. The
+   scripts live in the cardsystem repo under
+   `ha-config/toolauth/drupal_scripts/` and mirror the "authorized" branch of
+   the existing card-tap automations (parallel call to the reader alert
+   service + the activator). Using a script layer lets HA own the wiring
+   ("what does 'unlock the back door' actually mean in hardware?") and lets
+   the card-tap and Drupal-initiated paths evolve independently without
+   Drupal deploys. You can still point `ha_service:` at a raw
+   `esphome.*_enable` if you'd rather bypass the script.
 
 4. **Or flip globally.** Once every active asset has a correct `ha_service`,
    tick the **Enable Home Assistant as default backend** checkbox — assets
