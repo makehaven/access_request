@@ -2,6 +2,7 @@
 
 namespace Drupal\access_request;
 
+use Drupal\access_control_api_logger\Service\AccessStatusEvaluator;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use GuzzleHttp\ClientInterface;
@@ -13,6 +14,7 @@ use Symfony\Component\Yaml\Yaml;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\State\StateInterface;
+use Drupal\user\UserInterface;
 
 /**
  * Service for handling access requests.
@@ -28,6 +30,9 @@ class AccessRequestService {
   const FAILURE_THRESHOLD = 3; // Number of consecutive failures before opening the circuit.
   const RESET_TIMEOUT = 60;    // Time in seconds to stay in open state before attempting half-open.
 
+  const BACKEND_PYTHON = 'python';
+  const BACKEND_HA = 'home_assistant';
+
   protected $config;
   protected $logger;
   protected $httpClient;
@@ -37,11 +42,13 @@ class AccessRequestService {
   protected $requestStack;
   protected $routeMatch;
   protected StateInterface $state;
+  protected HomeAssistantClient $homeAssistantClient;
+  protected AccessStatusEvaluator $accessStatusEvaluator;
 
   /**
    * Constructs an AccessRequestService object.
    */
-  public function __construct(ConfigFactoryInterface $config_factory, LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid, RequestStack $request_stack, RouteMatchInterface $route_match, StateInterface $state) {
+  public function __construct(ConfigFactoryInterface $config_factory, LoggerChannelFactoryInterface $logger_factory, ClientInterface $http_client, AccountInterface $current_user, EntityTypeManagerInterface $entity_type_manager, UuidInterface $uuid, RequestStack $request_stack, RouteMatchInterface $route_match, StateInterface $state, HomeAssistantClient $home_assistant_client, AccessStatusEvaluator $access_status_evaluator) {
     $this->config = $config_factory->get('access_request.settings');
     $this->logger = $logger_factory->get('access_request');
     $this->httpClient = $http_client;
@@ -51,6 +58,8 @@ class AccessRequestService {
     $this->requestStack = $request_stack;
     $this->routeMatch = $route_match;
     $this->state = $state;
+    $this->homeAssistantClient = $home_assistant_client;
+    $this->accessStatusEvaluator = $access_status_evaluator;
   }
 
   /**
@@ -121,6 +130,15 @@ class AccessRequestService {
     $request = $this->requestStack->getCurrentRequest();
     $method = $request->query->get('method', 'website');
 
+    // Carry the asset's HA service + per-asset backend override through to
+    // sendRequest() so the backend selection logic has everything it needs.
+    $ha_service = isset($map[$asset_key]['ha_service']) && is_string($map[$asset_key]['ha_service'])
+      ? $map[$asset_key]['ha_service']
+      : '';
+    $asset_backend = isset($map[$asset_key]['backend']) && is_string($map[$asset_key]['backend'])
+      ? $map[$asset_key]['backend']
+      : '';
+
     $payload_array = [
       'reader_name'   => $reader_name,
       'card_id'       => $card_id,
@@ -130,6 +148,8 @@ class AccessRequestService {
       'permission_id' => $permission_id,
       'source'        => 'website',
       'method'        => $method,
+      'ha_service'    => $ha_service,
+      'backend'       => $asset_backend,
     ];
 
     return $this->sendRequest($payload_array);
@@ -168,9 +188,105 @@ class AccessRequestService {
   }
 
   /**
-   * Sends the request to the gateway.
+   * Selects the effective backend for a request.
+   *
+   * Precedence:
+   *   1. Per-asset `backend:` in the asset_map
+   *   2. Global `home_assistant.enabled` master switch
+   *   3. Default: Python gateway
+   */
+  protected function selectBackend(array $payload_array): string {
+    $asset_backend = (string) ($payload_array['backend'] ?? '');
+    if ($asset_backend === self::BACKEND_PYTHON || $asset_backend === self::BACKEND_HA) {
+      return $asset_backend;
+    }
+    // Robust truthy check: Drupal config coming back from drush cset can arrive
+    // as the literal string "false" which is truthy in PHP if casted directly.
+    $raw = $this->config->get('home_assistant.enabled');
+    $ha_enabled = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === TRUE;
+    return $ha_enabled ? self::BACKEND_HA : self::BACKEND_PYTHON;
+  }
+
+  /**
+   * Routes the request to the configured backend.
    */
   protected function sendRequest(array $payload_array) {
+    $backend = $this->selectBackend($payload_array);
+    if ($backend === self::BACKEND_HA) {
+      return $this->sendViaHomeAssistant($payload_array);
+    }
+    return $this->sendViaPythonGateway($payload_array);
+  }
+
+  /**
+   * Sends the access decision + relay fire via direct calls to HA.
+   *
+   * Permission is evaluated locally via AccessStatusEvaluator (the check
+   * that the Python broker used to perform for us). On allow, we POST to
+   * HA's /api/services/{domain}/{service} to fire the relay.
+   */
+  protected function sendViaHomeAssistant(array $payload_array): array {
+    $request_id = $this->uuid->generate();
+    $log_context = [
+      '@request_id' => $request_id,
+      '@uid' => $payload_array['uid'],
+      '@email' => $payload_array['email'],
+      '@card_id' => $payload_array['card_id'],
+      '@asset_id' => $payload_array['asset_id'],
+      '@permission_id' => $payload_array['permission_id'],
+      '@reader_name' => $payload_array['reader_name'],
+      '@backend' => self::BACKEND_HA,
+    ];
+
+    $account = $this->entityTypeManager->getStorage('user')->load($payload_array['uid']);
+    if (!$account instanceof UserInterface) {
+      $log_context['@http_status'] = 404;
+      $log_context['@result'] = 'denied';
+      $log_context['@reason'] = 'user_not_found';
+      $this->logger->warning('Access request denied: user not loaded. request_id=@request_id uid=@uid backend=@backend', $log_context);
+      return ['http_status' => 404, 'body' => 'User not found.'];
+    }
+
+    $evaluation = $this->accessStatusEvaluator->evaluate($account);
+    if (($evaluation['summary']['state'] ?? '') !== 'ok') {
+      $reason = (string) ($evaluation['summary']['message'] ?? 'blocked');
+      $log_context['@http_status'] = 403;
+      $log_context['@result'] = 'denied';
+      $log_context['@reason'] = $reason;
+      $this->logger->info('Access request denied locally before HA call. request_id=@request_id uid=@uid asset_id=@asset_id reason=@reason', $log_context);
+      return ['http_status' => 403, 'body' => $reason];
+    }
+
+    $ha_service = (string) ($payload_array['ha_service'] ?? '');
+    if ($ha_service === '' || !str_contains($ha_service, '.')) {
+      $log_context['@http_status'] = 500;
+      $log_context['@result'] = 'error';
+      $log_context['@reason'] = 'ha_service_missing_or_malformed';
+      $this->logger->error('Access request (HA): asset_map is missing a valid ha_service. asset_id=@asset_id ha_service=@svc', $log_context + ['@svc' => $ha_service]);
+      return ['http_status' => 500, 'body' => 'No Home Assistant service configured for this asset.'];
+    }
+
+    [$domain, $service] = explode('.', $ha_service, 2);
+    $start = microtime(TRUE);
+    $response = $this->homeAssistantClient->callService($domain, $service);
+    $latency = microtime(TRUE) - $start;
+
+    $log_context['@http_status'] = $response['http_status'];
+    $log_context['@latency'] = $latency;
+    $log_context['@result'] = ($response['http_status'] >= 200 && $response['http_status'] < 300) ? 'allowed' : 'error';
+    $log_context['@reason'] = (string) ($response['body'] ?? '');
+    $this->logger->info(
+      'Access request (HA): request_id=@request_id uid=@uid email=@email card_id=@card_id asset_id=@asset_id permission_id=@permission_id reader_name=@reader_name http_status=@http_status latency=@latency result=@result backend=@backend',
+      $log_context
+    );
+
+    return $response;
+  }
+
+  /**
+   * Sends the request to the Python gateway (legacy path; still active).
+   */
+  protected function sendViaPythonGateway(array $payload_array) {
     $url = $this->config->get('python_gateway_url');
     $timeout = $this->config->get('timeout_seconds');
     $hmac_secret = $this->config->get('web_hmac_secret');
@@ -229,6 +345,7 @@ class AccessRequestService {
       '@asset_id' => $payload_array['asset_id'],
       '@permission_id' => $payload_array['permission_id'],
       '@reader_name' => $payload_array['reader_name'],
+      '@backend' => self::BACKEND_PYTHON,
     ];
 
     $success = FALSE;
@@ -300,7 +417,7 @@ class AccessRequestService {
     $log_context['@reason'] = $response_body;
 
     $this->logger->info(
-      'Access request: request_id=@request_id, uid=@uid, email=@email, card_id=@card_id, asset_id=@asset_id, permission_id=@permission_id, reader_name=@reader_name, http_status=@http_status, latency=@latency, result=@result, reason=@reason',
+      'Access request: request_id=@request_id, uid=@uid, email=@email, card_id=@card_id, asset_id=@asset_id, permission_id=@permission_id, reader_name=@reader_name, http_status=@http_status, latency=@latency, result=@result, reason=@reason, backend=@backend',
       $log_context
     );
 

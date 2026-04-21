@@ -2,6 +2,7 @@
 
 namespace Drupal\access_request\Form;
 
+use Drupal\access_request\HomeAssistantClient;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
@@ -47,6 +48,44 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#title' => $this->t('HMAC Secret'),
       '#description' => $this->t('The HMAC secret for signing requests. Leave empty to disable signing.'),
       '#default_value' => $config->get('web_hmac_secret'),
+    ];
+
+    $form['home_assistant'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Home Assistant (direct backend)'),
+      '#description' => $this->t('Optional parallel backend. When enabled, assets without an explicit <code>backend:</code> in the asset map will be handled by calling Home Assistant directly instead of the Python gateway. The Python gateway still handles every asset that has <code>backend: python</code> or defaults while this master switch is off.'),
+    ];
+
+    $form['home_assistant']['home_assistant_enabled'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Enable Home Assistant as default backend'),
+      '#description' => $this->t('Master switch. Per-asset <code>backend: python</code> or <code>backend: home_assistant</code> overrides still apply regardless of this toggle.'),
+      '#default_value' => (bool) ($config->get('home_assistant.enabled') ?? FALSE),
+    ];
+
+    $form['home_assistant']['home_assistant_base_url'] = [
+      '#type' => 'url',
+      '#title' => $this->t('Home Assistant base URL'),
+      '#description' => $this->t('E.g. <code>https://homeassistant.dev.access.makehaven.org</code>. No trailing slash.'),
+      '#default_value' => $config->get('home_assistant.base_url'),
+    ];
+
+    $form['home_assistant']['home_assistant_timeout_seconds'] = [
+      '#type' => 'number',
+      '#title' => $this->t('Home Assistant request timeout (seconds)'),
+      '#default_value' => $config->get('home_assistant.timeout_seconds') ?? 5,
+      '#min' => 1,
+      '#max' => 30,
+    ];
+
+    $token_present = getenv(HomeAssistantClient::TOKEN_ENV_VAR) !== FALSE
+      && trim((string) getenv(HomeAssistantClient::TOKEN_ENV_VAR)) !== '';
+    $form['home_assistant']['home_assistant_token_status'] = [
+      '#type' => 'item',
+      '#title' => $this->t('Bearer token (via Pantheon Secrets)'),
+      '#markup' => $token_present
+        ? $this->t('Detected: environment variable <code>@var</code> is set.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR])
+        : $this->t('<strong>Not configured.</strong> Set it on each env with <code>terminus secret:site:set makehaven-website @var &lt;token&gt;</code>.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR]),
     ];
 
     $form['user_settings'] = [
@@ -130,7 +169,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
     $form['asset_map'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Asset Map'),
-      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br>- <strong>permission_id</strong>: The permission ID required for this asset (optional, defaults to the asset ID).<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;image: /modules/custom/access_request/images/backdoor.jpg<br>&nbsp;&nbsp;category: doors<br>&nbsp;&nbsp;permission_id: backdoor_permission</code>'),
+      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br>- <strong>permission_id</strong>: The permission ID required for this asset (optional, defaults to the asset ID).<br>- <strong>ha_service</strong>: Home Assistant service to call when backend is <code>home_assistant</code>, formatted as <code>domain.service</code> (e.g. <code>esphome.backdooractivator_enable</code>).<br>- <strong>backend</strong>: Per-asset override, either <code>python</code> or <code>home_assistant</code>. Omit to defer to the master switch above.<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;category: doors<br>&nbsp;&nbsp;ha_service: esphome.backdooractivator_enable<br>&nbsp;&nbsp;backend: home_assistant</code>'),
       '#default_value' => $config->get('asset_map'),
     ];
 
@@ -152,6 +191,9 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('python_gateway_url', $form_state->getValue('python_gateway_url'))
       ->set('timeout_seconds', $form_state->getValue('timeout_seconds'))
       ->set('web_hmac_secret', $form_state->getValue('web_hmac_secret'))
+      ->set('home_assistant.enabled', (bool) $form_state->getValue('home_assistant_enabled'))
+      ->set('home_assistant.base_url', rtrim((string) $form_state->getValue('home_assistant_base_url'), '/'))
+      ->set('home_assistant.timeout_seconds', (int) $form_state->getValue('home_assistant_timeout_seconds'))
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))

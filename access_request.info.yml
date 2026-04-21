@@ -5,4 +5,5 @@ core_version_requirement: ^10 || ^11
 package: Makerspace
 dependencies:
   - views
+  - access_control_api_logger
 configure: access_request.admin_settings
