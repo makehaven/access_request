@@ -85,28 +85,47 @@ class AccessRequestService {
 
     // 1) Normalize to a known asset key:
     //    - prefer exact match
-    //    - else if incoming ends with 'reader', strip it and try again
+    //    - else if incoming ends with 'activator' or 'reader', strip it and try
+    //      again. Both suffixes are stripped because QR codes have shipped with
+    //      both shapes ('backdoorreader' from the legacy print run,
+    //      'backdooractivator' from the HA-direct print run).
     $asset_key = $incoming;
     if (!array_key_exists($asset_key, $map)) {
-      if (preg_match('/reader$/', $asset_key)) {
-        $maybe = preg_replace('/reader$/', '', $asset_key);
-        if (is_string($maybe) && array_key_exists($maybe, $map)) {
-          $asset_key = $maybe; // e.g., "storedoorreader" -> "storedoor"
+      foreach (['activator', 'reader'] as $suffix) {
+        if (preg_match('/' . $suffix . '$/', $asset_key)) {
+          $maybe = preg_replace('/' . $suffix . '$/', '', $asset_key);
+          if (is_string($maybe) && array_key_exists($maybe, $map)) {
+            $asset_key = $maybe;
+            break;
+          }
         }
       }
     }
 
     // 2) Reader resolution precedence:
-    //    a) asset_map[asset_key].reader_name (explicit override)
-    //    b) asset_key, with 'reader' suffix appended if not present
-    if (isset($map[$asset_key]['reader_name']) && is_string($map[$asset_key]['reader_name'])) {
-      // a) Explicit override from map. Use it as-is.
+    //    a) asset_map[asset_key].reader (HA naming, used by both backends)
+    //    b) asset_map[asset_key].reader_name (legacy alias)
+    //    c) asset_key, with 'reader' suffix appended if not present
+    if (isset($map[$asset_key]['reader']) && is_string($map[$asset_key]['reader'])) {
+      $reader_name = $map[$asset_key]['reader'];
+    } elseif (isset($map[$asset_key]['reader_name']) && is_string($map[$asset_key]['reader_name'])) {
       $reader_name = $map[$asset_key]['reader_name'];
     } else {
-      // b) Default legacy behavior: asset key + suffix if needed.
       $reader_name = $asset_key;
       if (!preg_match('/reader$/', $reader_name)) {
         $reader_name .= 'reader';
+      }
+    }
+
+    // 2b) Activator resolution (HA-only field):
+    //    a) asset_map[asset_key].activator (explicit)
+    //    b) asset_key + 'activator' suffix
+    if (isset($map[$asset_key]['activator']) && is_string($map[$asset_key]['activator'])) {
+      $activator_name = $map[$asset_key]['activator'];
+    } else {
+      $activator_name = $asset_key;
+      if (!preg_match('/activator$/', $activator_name)) {
+        $activator_name .= 'activator';
       }
     }
 
@@ -130,8 +149,8 @@ class AccessRequestService {
     $request = $this->requestStack->getCurrentRequest();
     $method = $request->query->get('method', 'website');
 
-    // Carry the asset's HA service + per-asset backend override through to
-    // sendRequest() so the backend selection logic has everything it needs.
+    // Per-asset HA service override (rare). Without one, sendViaHomeAssistant()
+    // falls back to the global home_assistant.authorize_service.
     $ha_service = isset($map[$asset_key]['ha_service']) && is_string($map[$asset_key]['ha_service'])
       ? $map[$asset_key]['ha_service']
       : '';
@@ -141,6 +160,7 @@ class AccessRequestService {
 
     $payload_array = [
       'reader_name'   => $reader_name,
+      'activator_name' => $activator_name,
       'card_id'       => $card_id,
       'uid'           => $this->currentUser->id(),
       'email'         => $this->currentUser->getEmail(),
@@ -257,18 +277,37 @@ class AccessRequestService {
       return ['http_status' => 403, 'body' => $reason];
     }
 
+    // Per-asset ha_service overrides the global authorize service.
     $ha_service = (string) ($payload_array['ha_service'] ?? '');
-    if ($ha_service === '' || !str_contains($ha_service, '.')) {
+    if ($ha_service === '') {
+      $ha_service = (string) ($this->config->get('home_assistant.authorize_service') ?? 'script.authorization_request');
+    }
+    if (!str_contains($ha_service, '.')) {
       $log_context['@http_status'] = 500;
       $log_context['@result'] = 'error';
-      $log_context['@reason'] = 'ha_service_missing_or_malformed';
-      $this->logger->error('Access request (HA): asset_map is missing a valid ha_service. asset_id=@asset_id ha_service=@svc', $log_context + ['@svc' => $ha_service]);
-      return ['http_status' => 500, 'body' => 'No Home Assistant service configured for this asset.'];
+      $log_context['@reason'] = 'ha_service_malformed';
+      $this->logger->error('Access request (HA): malformed ha_service @svc for asset_id=@asset_id', $log_context + ['@svc' => $ha_service]);
+      return ['http_status' => 500, 'body' => 'Malformed Home Assistant service name.'];
     }
+
+    $activator = (string) ($payload_array['activator_name'] ?? '');
+    if ($activator === '') {
+      $log_context['@http_status'] = 500;
+      $log_context['@result'] = 'error';
+      $log_context['@reason'] = 'activator_missing';
+      $this->logger->error('Access request (HA): activator missing for asset_id=@asset_id', $log_context);
+      return ['http_status' => 500, 'body' => 'No activator configured for this asset.'];
+    }
+
+    $body = [
+      'card_serial' => (string) ($payload_array['card_id'] ?? ''),
+      'activator'   => $activator,
+      'reader'      => (string) ($payload_array['reader_name'] ?? ''),
+    ];
 
     [$domain, $service] = explode('.', $ha_service, 2);
     $start = microtime(TRUE);
-    $response = $this->homeAssistantClient->callService($domain, $service);
+    $response = $this->homeAssistantClient->callService($domain, $service, $body);
     $latency = microtime(TRUE) - $start;
 
     $log_context['@http_status'] = $response['http_status'];

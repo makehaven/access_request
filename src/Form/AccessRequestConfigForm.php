@@ -78,6 +78,13 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#max' => 30,
     ];
 
+    $form['home_assistant']['home_assistant_authorize_service'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Authorize service'),
+      '#description' => $this->t('Home Assistant service that handles the full authorization flow (notifies the reader and fires the activator). Format: <code>domain.service</code>. Default: <code>script.authorization_request</code>. Drupal POSTs <code>{card_serial, activator, reader}</code> to this service for every HA-backed asset that does not specify its own <code>ha_service:</code>.'),
+      '#default_value' => $config->get('home_assistant.authorize_service') ?? 'script.authorization_request',
+    ];
+
     $token_present = getenv(HomeAssistantClient::TOKEN_ENV_VAR) !== FALSE
       && trim((string) getenv(HomeAssistantClient::TOKEN_ENV_VAR)) !== '';
     $form['home_assistant']['home_assistant_token_status'] = [
@@ -169,7 +176,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
     $form['asset_map'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Asset Map'),
-      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br>- <strong>permission_id</strong>: The permission ID required for this asset (optional, defaults to the asset ID).<br>- <strong>ha_service</strong>: Home Assistant service to call when backend is <code>home_assistant</code>, formatted as <code>domain.service</code> (e.g. <code>esphome.backdooractivator_enable</code>).<br>- <strong>backend</strong>: Per-asset override, either <code>python</code> or <code>home_assistant</code>. Omit to defer to the master switch above.<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;category: doors<br>&nbsp;&nbsp;ha_service: esphome.backdooractivator_enable<br>&nbsp;&nbsp;backend: home_assistant</code>'),
+      '#description' => $this->t('A YAML mapping of asset IDs to asset information. The key for each asset is its unique ID.<br>Each asset has the following properties:<br>- <strong>name</strong>: The display name of the asset.<br>- <strong>description</strong>: A short description of the asset.<br>- <strong>image</strong>: The URL of an image for the asset (optional).<br>- <strong>category</strong>: A category for grouping assets (e.g., doors, metalshop).<br>- <strong>permission_id</strong>: The permission ID required for this asset (optional, defaults to the asset ID).<br>- <strong>activator</strong>: Home Assistant activator name passed to the authorize service (optional, defaults to <code>{key}activator</code>).<br>- <strong>reader</strong>: Home Assistant reader name passed to the authorize service (optional, defaults to <code>{key}reader</code>).<br>- <strong>ha_service</strong>: Override the global authorize service for this asset, formatted as <code>domain.service</code>. Usually omitted.<br>- <strong>backend</strong>: Per-asset override, either <code>python</code> or <code>home_assistant</code>. Omit to defer to the master switch above.<br><br>Example:<br><code>backdoor:<br>&nbsp;&nbsp;name: Back Door<br>&nbsp;&nbsp;description: Main rear entrance.<br>&nbsp;&nbsp;category: doors</code>'),
       '#default_value' => $config->get('asset_map'),
     ];
 
@@ -194,6 +201,7 @@ class AccessRequestConfigForm extends ConfigFormBase {
       ->set('home_assistant.enabled', (bool) $form_state->getValue('home_assistant_enabled'))
       ->set('home_assistant.base_url', rtrim((string) $form_state->getValue('home_assistant_base_url'), '/'))
       ->set('home_assistant.timeout_seconds', (int) $form_state->getValue('home_assistant_timeout_seconds'))
+      ->set('home_assistant.authorize_service', trim((string) $form_state->getValue('home_assistant_authorize_service')))
       ->set('asset_map', $form_state->getValue('asset_map'))
       ->set('dry_run', $form_state->getValue('dry_run'))
       ->set('user_block_field', $form_state->getValue('user_block_field'))

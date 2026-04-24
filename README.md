@@ -73,32 +73,31 @@ functional and is the default until you opt an asset in.
    under **Home Assistant (direct backend)**. The settings form shows whether
    the token env var is detected.
 
-3. **Per-asset opt-in.** Add `ha_service:` to each asset in the asset map and
-   (optionally) `backend: home_assistant` to opt that one asset in without
-   flipping the master switch:
+3. **Per-asset opt-in.** Add `backend: home_assistant` to each asset that
+   should use HA. Optionally override the activator/reader names; otherwise
+   they default to `<key>activator` / `<key>reader`:
 
    ```yaml
    backdoor:
      name: Back Door
      category: doors
-     ha_service: script.drupal_unlock_backdoor
      backend: home_assistant
+     # activator: backdooractivator   # default
+     # reader: backdoorreader         # default
    ```
 
-   The default asset map points `ha_service:` at **HA scripts** named
-   `script.drupal_unlock_<door>`, not directly at `esphome.*_enable`. The
-   scripts live in the cardsystem repo under
-   `ha-config/toolauth/drupal_scripts/` and mirror the "authorized" branch of
-   the existing card-tap automations (parallel call to the reader alert
-   service + the activator). Using a script layer lets HA own the wiring
-   ("what does 'unlock the back door' actually mean in hardware?") and lets
-   the card-tap and Drupal-initiated paths evolve independently without
-   Drupal deploys. You can still point `ha_service:` at a raw
-   `esphome.*_enable` if you'd rather bypass the script.
+   All HA-backed assets share a single Home Assistant service (the
+   *authorize service*, default `script.authorization_request`) configured
+   under **Home Assistant → Authorize service**. Drupal POSTs
+   `{card_serial, activator, reader}` to that service and Home Assistant
+   does the rest (notifies the reader and fires the activator). To override
+   the authorize service for a single asset, add `ha_service: domain.service`
+   to its asset_map entry.
 
-4. **Or flip globally.** Once every active asset has a correct `ha_service`,
-   tick the **Enable Home Assistant as default backend** checkbox — assets
-   without an explicit `backend:` then use HA.
+4. **Or flip globally.** Once every active asset's `activator`/`reader`
+   defaults look right (or are explicitly set), tick the **Enable Home
+   Assistant as default backend** checkbox — assets without an explicit
+   `backend:` then use HA.
 
 ### Behavior
 
@@ -106,13 +105,18 @@ When an asset resolves to the HA backend:
 
 1. The module calls `AccessStatusEvaluator` (from `access_control_api_logger`)
    to check payment pause, payment failure, access override, role, and door
-   badge for the requesting member — the same checks the Python broker used to
-   perform against Drupal on our behalf.
+   badge for the requesting member — fast local denial avoids a network round
+   trip and HA noise for paused members.
 2. If denied, logs the reason and returns **403** without calling HA.
-3. If allowed, POSTs to `{base_url}/api/services/{domain}/{service}` with the
-   Bearer token.
+3. If allowed, POSTs to `{base_url}/api/services/{authorize_service}` with the
+   Bearer token and body `{card_serial, activator, reader}`.
 4. A separate circuit breaker guards HA (state keys prefixed `ha_`), so the
    legacy Python breaker is untouched.
+
+The `/access-request/asset/{asset}` route accepts the bare key
+(`backdoor`), the activator-suffixed form (`backdooractivator`, used by the
+HA-direct QR codes), or the reader-suffixed form (`backdoorreader`, the
+legacy QR-code shape). All three resolve to the same asset_map entry.
 
 Log lines include `backend=python|home_assistant` so you can see which backend
 answered each request.
