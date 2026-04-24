@@ -27,5 +27,9 @@ asset_map: |
     description: Internal entrance to the store/inventory area.
     image: ''
     category: 'doors'
+    # Store door breaks the <key>activator / <key>reader convention — both
+    # the activator and reader entities on HA are just "storedoor".
+    activator: 'storedoor'
+    reader: 'storedoor'
 dry_run: false
 user_block_field: ''
