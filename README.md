@@ -60,13 +60,15 @@ functional and is the default until you opt an asset in.
 
 ### Enabling
 
-1. **Store the bearer token as a Pantheon Secret** on each environment. The
-   module reads `HA_BEARER_TOKEN` from the environment and never from config:
+1. **Store the bearer token as a Pantheon Secret.** The module reads
+   `HA_BEARER_TOKEN` via `pantheon_get_secret()` on Pantheon (the same
+   pattern as `CIVICRM_SITE_KEY` in `civicrm.settings.php`), and falls back
+   to `getenv()` on Lando/local. **Type must be `runtime`, scope must
+   include `web`** — otherwise PHP cannot read it. A single default secret
+   covers dev/test/live (no per-env override needed):
 
    ```sh
-   terminus secret:site:set makehaven-website HA_BEARER_TOKEN "<token>" --env=dev
-   terminus secret:site:set makehaven-website HA_BEARER_TOKEN "<token>" --env=test
-   terminus secret:site:set makehaven-website HA_BEARER_TOKEN "<token>" --env=live
+   terminus secret:site:set makehaven-website HA_BEARER_TOKEN "<token>" --type=runtime --scope=web
    ```
 
 2. **Configure the base URL** at *Config → System → Access Request Settings*

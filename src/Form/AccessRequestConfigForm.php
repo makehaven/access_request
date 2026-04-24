@@ -85,14 +85,16 @@ class AccessRequestConfigForm extends ConfigFormBase {
       '#default_value' => $config->get('home_assistant.authorize_service') ?? 'script.authorization_request',
     ];
 
-    $token_present = getenv(HomeAssistantClient::TOKEN_ENV_VAR) !== FALSE
-      && trim((string) getenv(HomeAssistantClient::TOKEN_ENV_VAR)) !== '';
+    $token_value = function_exists('pantheon_get_secret')
+      ? pantheon_get_secret(HomeAssistantClient::TOKEN_ENV_VAR)
+      : (getenv(HomeAssistantClient::TOKEN_ENV_VAR) ?: ($_ENV[HomeAssistantClient::TOKEN_ENV_VAR] ?? NULL));
+    $token_present = is_string($token_value) && trim($token_value) !== '';
     $form['home_assistant']['home_assistant_token_status'] = [
       '#type' => 'item',
       '#title' => $this->t('Bearer token (via Pantheon Secrets)'),
       '#markup' => $token_present
-        ? $this->t('Detected: environment variable <code>@var</code> is set.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR])
-        : $this->t('<strong>Not configured.</strong> Set it on each env with <code>terminus secret:site:set makehaven-website @var &lt;token&gt;</code>.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR]),
+        ? $this->t('Detected: secret <code>@var</code> is set.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR])
+        : $this->t('<strong>Not configured.</strong> Set on Pantheon as a <em>Runtime, Web</em> secret: <code>terminus secret:site:set makehaven-website @var &lt;token&gt; --type=runtime --scope=web</code>.', ['@var' => HomeAssistantClient::TOKEN_ENV_VAR]),
     ];
 
     $form['user_settings'] = [

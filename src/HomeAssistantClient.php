@@ -179,13 +179,16 @@ class HomeAssistantClient {
   }
 
   /**
-   * Reads the bearer token from the environment.
+   * Reads the bearer token from Pantheon Secrets or environment.
    *
-   * Pantheon injects site secrets as env vars; on other hosts, the admin is
-   * expected to provide HA_BEARER_TOKEN via the server environment.
+   * On Pantheon, the token is stored as a Runtime secret (web scope) and
+   * accessed via pantheon_get_secret() — same pattern as CIVICRM_SITE_KEY in
+   * civicrm.settings.php. On Lando/other hosts, falls back to a real env var.
    */
   protected function readToken(): string {
-    $value = getenv(self::TOKEN_ENV_VAR);
+    $value = function_exists('pantheon_get_secret')
+      ? pantheon_get_secret(self::TOKEN_ENV_VAR)
+      : (getenv(self::TOKEN_ENV_VAR) ?: ($_ENV[self::TOKEN_ENV_VAR] ?? NULL));
     if ($value === FALSE || $value === NULL) {
       return '';
     }
