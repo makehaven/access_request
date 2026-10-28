@@ -5,6 +5,7 @@ namespace Drupal\access_request;
 use Drupal\access_control_api_logger\Service\AccessStatusEvaluator;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Drupal\Core\Site\Settings;
 use GuzzleHttp\ClientInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
@@ -231,6 +232,15 @@ class AccessRequestService {
    * Routes the request to the configured backend.
    */
   protected function sendRequest(array $payload_array) {
+    // Dev and test hold live's door credentials (Pantheon Secrets are
+    // site-wide), so a click there would unlock the real building. Only live
+    // talks to the doors; settings.php can opt an environment in for a
+    // deliberate hardware test.
+    $env = $_ENV['PANTHEON_ENVIRONMENT'] ?? (getenv('PANTHEON_ENVIRONMENT') ?: 'local');
+    if ($env !== 'live' && !Settings::get('access_request_allow_non_live', FALSE)) {
+      $this->logger->notice('Access request not sent: doors are only controlled from live (environment @env).', ['@env' => $env]);
+      return ['http_status' => 503, 'body' => 'Door control is only available on the live site.'];
+    }
     $backend = $this->selectBackend($payload_array);
     if ($backend === self::BACKEND_HA) {
       return $this->sendViaHomeAssistant($payload_array);
